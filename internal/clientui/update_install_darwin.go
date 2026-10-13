@@ -14,7 +14,7 @@ import (
 
 func detachUpdateHelper(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 func prepareAutomaticUpdate(ctx context.Context, archive, _ string) error {
-	serviceEnabled := prelogin.Status().Enabled
+	serviceEnabled := prelogin.Status().Managed()
 	if !strings.EqualFold(filepath.Ext(archive), ".dmg") {
 		return fmt.Errorf("不支援的 macOS 更新套件")
 	}

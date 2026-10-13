@@ -478,8 +478,8 @@ func (s *server) api(w http.ResponseWriter, r *http.Request) {
 		}
 		respond(w, 200, map[string]any{"incomingConnected": s.incomingActive, "prelogin": s.preloginState(), "info": s.info, "library": publicLibrary(s.library), "running": running, "sessions": sessions, "notice": s.notice, "hostConflict": s.hostConflict, "quick": quick, "passwordPrompt": s.passwordPrompt(), "preferences": s.preferences, "updates": s.updater.snapshot(), "hardwareJPEG": video.CachedHardwareJPEG().Encode, "superResolutionCapabilities": superres.Capabilities(), "coreMLModels": superres.Models(), "appleInterpolationSupported": frameinterp.AppleSupported(), "audioCapabilities": hardwareprobe.CachedAudioCapabilities(), "videoCapabilities": hardwareprobe.CachedVideoCapabilities(), "hardwareDetection": hardwareprobe.Snapshot()})
 	case r.URL.Path == "/api/local-password" && r.Method == "PUT":
-		if s.preloginBusy || prelogin.Status().Enabled {
-			fail(w, errors.New("請先停用未登入開機，再修改配對密碼。"))
+		if s.preloginBusy || prelogin.Status().Managed() {
+			fail(w, errors.New("請先停用系統服務，再修改配對密碼。"))
 			return
 		}
 		var request struct {
@@ -519,7 +519,7 @@ func (s *server) api(w http.ResponseWriter, r *http.Request) {
 			fail(w, err)
 			return
 		}
-		if err := s.storePreferences(r.Context(), preferences, prelogin.Status().Enabled, prelogin.UpdateStreamSettings); err != nil {
+		if err := s.storePreferences(r.Context(), preferences, prelogin.Status().Managed(), prelogin.UpdateStreamSettings); err != nil {
 			fail(w, err)
 			return
 		}
@@ -1124,9 +1124,26 @@ func (s *server) keepHostRunning(ctx context.Context) {
 			return
 		}
 		s.mu.Lock()
-		managed := s.preloginBusy || prelogin.Status().Enabled
+		state := prelogin.Status()
+		serviceBusy := s.preloginBusy
+		managed := serviceBusy || state.Managed()
 		s.mu.Unlock()
 		if managed {
+			if !serviceBusy && state.RuntimeProtocol == 1 {
+				// 管線由 APP context 關閉；不用輪詢心跳，也不在啟動時要求提權。
+				ready := func() {
+					s.mu.Lock()
+					defer s.mu.Unlock()
+					if s.notice == "系統操作服務尚未就緒，請稍後重試。" {
+						s.notice = ""
+					}
+				}
+				if err := prelogin.HoldDesktopAccess(ctx, ready); err != nil && ctx.Err() == nil {
+					s.mu.Lock()
+					s.notice = "系統操作服務尚未就緒，請稍後重試。"
+					s.mu.Unlock()
+				}
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -1138,7 +1155,7 @@ func (s *server) keepHostRunning(ctx context.Context) {
 			return
 		}
 		s.mu.Lock()
-		if s.preloginBusy || prelogin.Status().Enabled {
+		if s.preloginBusy || prelogin.Status().Managed() {
 			s.mu.Unlock()
 			continue
 		}
@@ -1188,7 +1205,7 @@ func (s *server) keepHostRunning(ctx context.Context) {
 							s.mu.Unlock()
 						}
 					}
-					if prelogin.Status().Enabled {
+					if prelogin.Status().Managed() {
 						child.stdin.Close()
 					}
 				}

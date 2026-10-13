@@ -1,4 +1,99 @@
 {
+  "授權系統操作": [
+    "Authorize system control",
+    "システム操作を許可",
+    "시스템 제어 허용"
+  ],
+  "系統操作服務模式": [
+    "System control service mode",
+    "システム操作サービスモード",
+    "시스템 제어 서비스 모드"
+  ],
+  "移除系統操作授權": [
+    "Remove system authorization",
+    "システム操作の許可を解除",
+    "시스템 제어 권한 제거"
+  ],
+  "移除": [
+    "Remove",
+    "削除",
+    "제거"
+  ],
+  "首次授權需管理員允許；登入前啟動關閉時，只在 APP 執行期間接受遠端連線。": [
+    "Initial authorization requires administrator approval. With pre-login startup off, remote connections are accepted only while the app runs.",
+    "初回の許可には管理者の承認が必要です。ログイン前起動がオフの場合、アプリの実行中のみリモート接続を受け付けます。",
+    "최초 권한 부여에는 관리자 승인이 필요합니다. 로그인 전 시작이 꺼져 있으면 앱 실행 중에만 원격 연결을 허용합니다."
+  ],
+  "允許 YourDesk 控制 Windows UAC 安全桌面？將安裝受保護的系統操作服務，接著會要求管理員授權。登入前啟動保持關閉，APP 關閉後停止遠端連線。": [
+    "Allow YourDesk to control the Windows UAC secure desktop? A protected system service will be installed with administrator approval. Pre-login startup stays off, and remote connections stop when the app closes.",
+    "YourDesk に Windows UAC のセキュアデスクトップの操作を許可しますか？管理者の承認で保護されたシステムサービスをインストールします。ログイン前起動はオフのままで、アプリ終了後はリモート接続を停止します。",
+    "YourDesk가 Windows UAC 보안 데스크톱을 제어하도록 허용할까요? 관리자 승인을 받아 보호된 시스템 서비스를 설치합니다. 로그인 전 시작은 꺼진 상태로 유지되며 앱을 닫으면 원격 연결이 중지됩니다."
+  ],
+  "移除 YourDesk 系統操作服務？接著會要求管理員授權，遠端控制將回到一般使用者模式。": [
+    "Remove the YourDesk system control service? Administrator approval is required. Remote control will return to normal user mode.",
+    "YourDesk のシステム操作サービスを削除しますか？管理者の承認が必要です。リモート操作は通常ユーザーモードに戻ります。",
+    "YourDesk 시스템 제어 서비스를 제거할까요? 관리자 승인이 필요하며 원격 제어는 일반 사용자 모드로 돌아갑니다."
+  ],
+  "允許 YourDesk 傳送 Ctrl+Alt+Del？將安裝系統操作服務，接著會要求 Windows 管理員授權；不會開啟登入前啟動。": [
+    "Allow YourDesk to send Ctrl+Alt+Del? A system control service will be installed with Windows administrator approval. Pre-login startup will remain off.",
+    "YourDesk に Ctrl+Alt+Del の送信を許可しますか？Windows 管理者の承認でシステム操作サービスをインストールします。ログイン前起動はオフのままです。",
+    "YourDesk의 Ctrl+Alt+Del 전송을 허용할까요? Windows 관리자 승인을 받아 시스템 제어 서비스를 설치합니다. 로그인 전 시작은 꺼진 상태로 유지됩니다."
+  ],
+  "請先關閉登入前啟動，再移除系統操作授權。": [
+    "Turn off pre-login startup before removing system authorization.",
+    "システム操作の許可を解除する前に、ログイン前起動をオフにしてください。",
+    "시스템 제어 권한을 제거하기 전에 로그인 전 시작을 끄세요."
+  ],
+  "開啟後可在登入前接受遠端連線；關閉後只在 APP 執行期間提供系統操作。": [
+    "When enabled, remote connections are accepted before login. When disabled, system control is available only while the app runs.",
+    "オンにするとログイン前のリモート接続を受け付けます。オフの場合、アプリの実行中のみシステム操作を提供します。",
+    "켜면 로그인 전에 원격 연결을 허용합니다. 끄면 앱 실행 중에만 시스템 제어를 제공합니다."
+  ],
+  "請先停用系統服務，再修改配對密碼。": [
+    "Disable the system service before changing the pairing password.",
+    "ペアリングパスワードを変更する前に、システムサービスを無効にしてください。",
+    "페어링 암호를 변경하기 전에 시스템 서비스를 끄세요."
+  ],
+  "請先停用系統服務，再修改 IP 直連或 Tailcat 模式。": [
+    "Disable the system service before changing direct IP access or Tailcat mode.",
+    "IP 直接接続または Tailcat モードを変更する前に、システムサービスを無効にしてください。",
+    "IP 직접 연결 또는 Tailcat 모드를 변경하기 전에 시스템 서비스를 끄세요."
+  ],
+  "正在變更系統服務。": [
+    "Changing system service settings.",
+    "システムサービスの設定を変更しています。",
+    "시스템 서비스 설정을 변경하는 중입니다."
+  ],
+  "系統服務尚未支援獨立授權，請更新 APP 與服務後再試。": [
+    "The system service does not support independent authorization yet. Update the app and service, then try again.",
+    "システムサービスは独立した許可に未対応です。アプリとサービスを更新して再試行してください。",
+    "시스템 서비스가 아직 독립 권한 부여를 지원하지 않습니다. 앱과 서비스를 업데이트한 후 다시 시도하세요."
+  ],
+  "無法確認系統服務模式，請檢查服務安裝。": [
+    "Unable to confirm the system service mode. Check the service installation.",
+    "システムサービスのモードを確認できません。サービスのインストールを確認してください。",
+    "시스템 서비스 모드를 확인할 수 없습니다. 서비스 설치를 확인하세요."
+  ],
+  "此平台不支援系統操作授權。": [
+    "System control authorization is not supported on this platform.",
+    "このプラットフォームはシステム操作の許可に対応していません。",
+    "이 플랫폼은 시스템 제어 권한 부여를 지원하지 않습니다."
+  ],
+  "無效的系統操作授權要求": [
+    "Invalid system control authorization request",
+    "システム操作の許可要求が無効です",
+    "잘못된 시스템 제어 권한 요청"
+  ],
+  "系統操作租約無效或已達上限。": [
+    "The system control lease is invalid or the limit has been reached.",
+    "システム操作の使用権が無効か、上限に達しています。",
+    "시스템 제어 사용 권한이 유효하지 않거나 한도에 도달했습니다."
+  ],
+  "系統操作服務尚未就緒，請稍後重試。": [
+    "The system control service is not ready. Try again shortly.",
+    "システム操作サービスの準備ができていません。しばらくしてから再試行してください。",
+    "시스템 제어 서비스가 준비되지 않았습니다. 잠시 후 다시 시도하세요."
+  ],
   "AAC 硬體": [
     "AAC Hardware",
     "AAC ハードウェア",

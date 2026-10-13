@@ -2,6 +2,7 @@ package hostsession
 
 import (
 	"image"
+	"sync/atomic"
 	"yourdesk/internal/p2p"
 )
 
@@ -11,6 +12,15 @@ type capturedFrame struct {
 	Image   image.Image
 	Display int
 	Epoch   uint64
+}
+
+// 擷取期間若切換了視野，舊影格仍要保留舊世代，由傳送階段丟棄；
+// 只有仍屬於目前視野的恢復影格才建立新世代及重置編碼參考。
+func recoveredCaptureEpoch(current *atomic.Uint64, captured uint64) uint64 {
+	if current.CompareAndSwap(captured, captured+1) {
+		return captured + 1
+	}
+	return captured
 }
 
 // 一次擷取產生的 JPEG 區塊整批交付，避免跨影格交錯。

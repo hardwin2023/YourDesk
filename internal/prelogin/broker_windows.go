@@ -56,6 +56,16 @@ func (s *windowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, 
 		slog.Error("無法記錄服務更新能力", "error", err)
 		return false, 1
 	}
+	autostart, err := desktopAutostart(root)
+	if err != nil {
+		slog.Error("無法確認系統服務模式", "error", err)
+		return false, 1
+	}
+	activity := newDesktopActivity(autostart)
+	if err = markDesktopControl(root); err != nil {
+		slog.Error("無法記錄系統操作能力", "error", err)
+		return false, 1
+	}
 	// 不提供密碼或任意命令；更新只啟動受保護、驗證官方套件的固定 worker。
 	listener, err := winio.ListenPipe(controlPipe, &winio.PipeConfig{SecurityDescriptor: "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"})
 	if err != nil {
@@ -90,7 +100,7 @@ func (s *windowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, 
 			}
 		}
 		return err
-	})
+	}, activity, func(enabled bool) error { return saveDesktopAutostart(root, enabled) })
 	setConnected := func(value bool) { mu.Lock(); connected = value; mu.Unlock() }
 	status := svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown | svc.AcceptSessionChange}
 	statuses <- status
@@ -111,6 +121,33 @@ func (s *windowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, 
 	defer stopAgent()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	reconcileAgent := func() {
+		current := windows.WTSGetActiveConsoleSessionId()
+		activity.retainConsole(current)
+		allowed := activity.allowed(current)
+		if agent != nil && (session != current || !allowed) {
+			stopAgent()
+		}
+		if agent != nil || !allowed {
+			return
+		}
+		agent, err = startServiceChild(current, "default", []string{"--prelogin", "agent"})
+		if err != nil {
+			slog.Warn("等待主控台代理", "error", err)
+			return
+		}
+		session, agentDone = current, agent.done
+		var eventContext context.Context
+		eventContext, eventCancel = context.WithCancel(ctx)
+		events = make(chan serviceEvent, 16)
+		go watchServiceOutput(eventContext, agent, events)
+		mu.Lock()
+		agentConfig := config
+		mu.Unlock()
+		if err = agent.send(agentConfig); err != nil {
+			stopAgent()
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -137,34 +174,14 @@ func (s *windowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, 
 				}
 			}
 		case <-ticker.C:
-			current := windows.WTSGetActiveConsoleSessionId()
-			if agent != nil && session != current {
-				stopAgent()
-			}
-			if agent != nil || current == 0 || current == 0xffffffff {
-				continue
-			}
-			agent, err = startServiceChild(current, "default", []string{"--prelogin", "agent"})
-			if err != nil {
-				slog.Warn("等待主控台代理", "error", err)
-				continue
-			}
-			session, agentDone = current, agent.done
-			var eventContext context.Context
-			eventContext, eventCancel = context.WithCancel(ctx)
-			events = make(chan serviceEvent, 16)
-			go watchServiceOutput(eventContext, agent, events)
-			mu.Lock()
-			agentConfig := config
-			mu.Unlock()
-			if err = agent.send(agentConfig); err != nil {
-				stopAgent()
-			}
+			reconcileAgent()
+		case <-activity.changed:
+			reconcileAgent()
 		}
 	}
 }
 
-func serveControl(ctx context.Context, listener net.Listener, operation func(string) bool, streamSettings func(StreamSettings) error) {
+func serveControl(ctx context.Context, listener net.Listener, operation func(string) bool, streamSettings func(StreamSettings) error, activity *desktopActivity, saveAutostart func(bool) error) {
 	// 限制未完成請求數量與期限，避免本機程式累積無上限的工作。
 	slots := make(chan struct{}, 8)
 	for {
@@ -181,6 +198,8 @@ func serveControl(ctx context.Context, listener net.Listener, operation func(str
 		go func() {
 			defer conn.Close()
 			defer func() { <-slots }()
+			stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+			defer stop()
 			conn.SetDeadline(time.Now().Add(2 * time.Second))
 			var request struct {
 				Operation string          `json:"operation"`
@@ -188,7 +207,29 @@ func serveControl(ctx context.Context, listener net.Listener, operation func(str
 				Stream    *StreamSettings `json:"stream,omitempty"`
 				Enabled   *bool           `json:"enabled,omitempty"`
 			}
-			if json.NewDecoder(io.LimitReader(conn, 1024)).Decode(&request) != nil || ctx.Err() != nil {
+			decoder := json.NewDecoder(io.LimitReader(conn, 1024))
+			if decoder.Decode(&request) != nil || ctx.Err() != nil {
+				return
+			}
+			if request.Operation == "desktop-lease" {
+				identity, err := consoleSettingsIdentity(conn)
+				if err != nil {
+					_ = json.NewEncoder(conn).Encode(streamSettingsReply{Error: err.Error()})
+					return
+				}
+				serveDesktopLease(ctx, conn, io.MultiReader(decoder.Buffered(), conn), activity, identity.Session)
+				return
+			}
+			if request.Operation == "autostart-settings" && request.Enabled != nil {
+				err := authorizeConsoleSettings(conn)
+				if err == nil {
+					err = activity.setAutostart(*request.Enabled, saveAutostart)
+				}
+				reply := streamSettingsReply{OK: err == nil}
+				if err != nil {
+					reply.Error = err.Error()
+				}
+				_ = json.NewEncoder(conn).Encode(reply)
 				return
 			}
 			if request.Operation == "stream-settings" && request.Stream != nil {

@@ -19,7 +19,7 @@ func detachUpdateHelper(cmd *exec.Cmd) {
 }
 func prepareAutomaticUpdate(ctx context.Context, archive, assetURL string) error {
 	portable := strings.HasSuffix(strings.ToLower(archive), "-portable.zip")
-	serviceEnabled := prelogin.Status().Enabled
+	serviceEnabled := prelogin.Status().Managed()
 	if !portable && !strings.HasSuffix(strings.ToLower(archive), "-setup.exe") {
 		return fmt.Errorf("此套件不支援自動安裝，請手動開啟下載檔案")
 	}

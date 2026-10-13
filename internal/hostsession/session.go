@@ -650,8 +650,12 @@ func Stream(ctx context.Context, sig *signaling.Client, options Options) error {
 			return capturedFrame{}, streampipeline.Skip
 		}
 
-		if captureUnavailable && options.OnState != nil {
-			options.OnState("capture-restored")
+		if captureUnavailable {
+			// 桌面重新可用時淘汰舊佇列並重建編碼參考，第一張送完整影格。
+			epoch = recoveredCaptureEpoch(&captureEpoch, epoch)
+			if options.OnState != nil {
+				options.OnState("capture-restored")
+			}
 		}
 		captureUnavailable = false
 		if view.Region != agentvideo.Full() {

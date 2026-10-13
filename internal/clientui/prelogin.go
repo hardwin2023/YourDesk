@@ -8,6 +8,32 @@ import (
 	"yourdesk/internal/prelogin"
 )
 
+type preloginChange struct {
+	Enabled         bool `json:"enabled"`
+	SecureAttention bool `json:"secureAttention"`
+	DesktopAccess   bool `json:"desktopAccess"`
+}
+
+func preloginChangeNeeded(status prelogin.State, request preloginChange) (bool, error) {
+	if !status.Supported {
+		return false, errors.New(status.Message)
+	}
+	if request.SecureAttention && (!request.Enabled || !status.SASSupported) {
+		return false, errors.New("無效的 Ctrl+Alt+Del 授權要求")
+	}
+	if request.DesktopAccess && (request.SecureAttention || !status.DesktopAccessSupported) {
+		return false, errors.New("無效的系統操作授權要求")
+	}
+	if request.DesktopAccess && !request.Enabled && status.Enabled {
+		return false, errors.New("請先關閉登入前啟動，再移除系統操作授權。")
+	}
+	current := status.Enabled
+	if request.DesktopAccess || request.SecureAttention {
+		current = status.Managed()
+	}
+	return current != request.Enabled || (request.SecureAttention && (!status.SASAllowed || status.SASDisabled)), nil
+}
+
 // 呼叫端持有 s.mu，與 Host 啟動／服務交接共用同一把鎖。
 func (s *server) preloginState() prelogin.State {
 	state := prelogin.Status()
@@ -64,10 +90,7 @@ func (s *server) handlePrelogin(w http.ResponseWriter, r *http.Request) bool {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return true
 	}
-	var request struct {
-		Enabled         bool `json:"enabled"`
-		SecureAttention bool `json:"secureAttention"`
-	}
+	var request preloginChange
 	if err := decode(w, r, &request); err != nil {
 		fail(w, err)
 		return true
@@ -79,26 +102,25 @@ func (s *server) handlePrelogin(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	status := prelogin.Status()
-	if !status.Supported {
+	needed, err := preloginChangeNeeded(status, request)
+	if err != nil {
 		s.mu.Unlock()
-		fail(w, errors.New(status.Message))
+		fail(w, err)
 		return true
 	}
-	if request.SecureAttention && (!request.Enabled || !status.SASSupported) {
-		s.mu.Unlock()
-		fail(w, errors.New("無效的 Ctrl+Alt+Del 授權要求"))
-		return true
-	}
-	if status.Enabled == request.Enabled && (!request.SecureAttention || (status.SASAllowed && !status.SASDisabled)) {
+	if !needed {
 		s.mu.Unlock()
 		respond(w, 200, map[string]bool{"ok": true})
 		return true
 	}
 	s.preloginBusy = true
 	s.preloginMessage = "正在變更系統服務，請完成管理員授權。"
+	if !request.SecureAttention && !request.DesktopAccess && status.RuntimeProtocol == 1 {
+		s.preloginMessage = "正在變更系統服務。"
+	}
 	config := prelogin.Config{Tailcat: s.preferences.TailcatEnabled, Room: s.info["room"], Signal: s.options.Signal, Secret: s.options.Secret, Codec: s.preferences.Codec, CodecGoal: s.preferences.CodecGoal, Direct: s.preferences.DirectListen}
 	host := s.children["host"]
-	if request.SecureAttention && status.Enabled {
+	if request.SecureAttention && status.Managed() {
 		host = nil
 	} // 僅調整原則時不必停止既有 Host。
 	if host != nil {
@@ -120,6 +142,8 @@ func (s *server) handlePrelogin(w http.ResponseWriter, r *http.Request) bool {
 		if err == nil {
 			if request.SecureAttention {
 				err = prelogin.ConfigureSecureAttention(ctx, config)
+			} else if request.DesktopAccess {
+				err = prelogin.ConfigureDesktopAccess(ctx, request.Enabled, config)
 			} else {
 				err = prelogin.Configure(ctx, request.Enabled, config)
 			}

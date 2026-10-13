@@ -33,16 +33,22 @@ func (c Config) validate() error {
 }
 
 type State struct {
-	SASDisabled  bool   `json:"sasDisabled"`
-	SASSupported bool   `json:"sasSupported"`
-	SASAllowed   bool   `json:"sasAllowed"`
-	Room         string `json:"room,omitempty"`
-	Supported    bool   `json:"supported"`
-	Enabled      bool   `json:"enabled"`
-	Busy         bool   `json:"busy"`
-	Message      string `json:"message"`
-	Error        string `json:"error,omitempty"`
+	Installed              bool   `json:"installed"`
+	DesktopAccessSupported bool   `json:"desktopAccessSupported"`
+	RuntimeProtocol        int    `json:"runtimeProtocol"`
+	SASDisabled            bool   `json:"sasDisabled"`
+	SASSupported           bool   `json:"sasSupported"`
+	SASAllowed             bool   `json:"sasAllowed"`
+	Room                   string `json:"room,omitempty"`
+	Supported              bool   `json:"supported"`
+	Enabled                bool   `json:"enabled"`
+	Busy                   bool   `json:"busy"`
+	Message                string `json:"message"`
+	Error                  string `json:"error,omitempty"`
 }
+
+// Managed 與開機連線分開；執行期間授權也由受保護服務維持 Host。
+func (s State) Managed() bool { return s.Installed || s.Enabled }
 
 // Handle 在一般 APP／Host 啟動前處理專用服務入口。
 func Handle(ctx context.Context, args []string) (bool, error) {
@@ -99,6 +105,20 @@ func Handle(ctx context.Context, args []string) (bool, error) {
 			return true, errors.New("缺少安裝設定")
 		}
 		return true, install(args[2])
+	case "install-runtime", "install-runtime-sas":
+		if len(args) != 3 || !Status().DesktopAccessSupported {
+			return true, errors.New("此平台不支援系統操作授權。")
+		}
+		if err := installDesktopAccess(args[2]); err != nil {
+			return true, err
+		}
+		if args[1] == "install-runtime-sas" {
+			if err := enableSecureAttentionPolicy(); err != nil {
+				return true, err
+			}
+			return true, SetSecureAttentionEnabled(ctx, true)
+		}
+		return true, nil
 	case "remove":
 		return true, remove()
 	default:

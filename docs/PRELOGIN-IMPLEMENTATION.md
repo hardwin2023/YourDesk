@@ -25,9 +25,9 @@
 
 ## 停用、更新與失敗
 
-關閉登入前啟動需管理員授權。停止 broker、回收代理後，確認 Host 排他鎖可取得才移除服務目錄；若尚有 Host 存活則保留目錄並回報錯誤，避免刪除鎖後產生第二個 Host。停用成功後，主介面恢復一般 Host 模式。
+macOS 關閉登入前啟動需管理員授權。停止 broker、回收代理後，確認 Host 排他鎖可取得才移除服務目錄；若尚有 Host 存活則保留目錄並回報錯誤，避免刪除鎖後產生第二個 Host。停用成功後，主介面恢復一般 Host 模式。
 
-APP 自動安裝更新會等 APP 退出後停止登入前服務、更新主程式及受保護的服務副本，再恢復服務並開啟 APP；原本未啟用時不會安裝或啟用服務。Windows 新版服務沿用第一次管理員授權，後續 APP 內更新不再跳 UAC；舊服務首次遷移仍需一次授權。macOS 目前仍會取得管理員授權。配對設定及既有 SAS 原則保留，更新失敗會嘗試還原程式與服務備份。更新期間遠端連線會中斷，需重新連線。
+APP 自動安裝更新會等 APP 退出後停止登入前服務、更新主程式及受保護的服務副本，再恢復服務並開啟 APP；原本未安裝服務時不會安裝或啟用服務。Windows 只授權系統操作而未開啟登入前啟動時，也會更新既有服務副本並保留模式。Windows 新版服務沿用第一次管理員授權，後續 APP 內更新不再跳 UAC；舊服務首次遷移仍需一次授權。macOS 目前仍會取得管理員授權。配對設定及既有 SAS 原則保留，更新失敗會嘗試還原程式與服務備份。更新期間遠端連線會中斷，需重新連線。
 
 macOS 自動更新需連續三次確認受保護 broker 可回覆 `health`，且目前工作階段的代理已交接有效 Host，才刪除舊版備份；不能以 launchd 工作註冊成功當成服務可用。健康檢查或新版啟動失敗時，還原 APP／服務副本，並以原登入使用者重新開啟原 APP；錯誤記錄保留。此檢查不代表螢幕授權、外部網路或 P2P 連線已驗證。
 
@@ -58,9 +58,9 @@ MCP 沒有隨此功能安裝成系統服務，也不會自動啟用；原本的 
 - `YourDeskPrelogin` 註冊為 SCM 的自動啟動服務，以 LocalSystem 執行。服務異常退出後由 SCM 重啟；網路連線沿用 Host 的重試流程。開機啟動不依賴使用者登入、Run 登錄項目或自動登入設定。
 - 啟用透過 UAC 提升安裝程序，將目前 Client 複製到系統 Program Files 下的 `YourDeskPrelogin` 目錄。目錄僅 SYSTEM／管理員可寫；配對密碼的 `config.json` 使用明確 Windows ACL，僅 SYSTEM／管理員可讀寫。公開檔案僅提供裝置 ID。
 - Session 0 的服務以自己的主權杖建立目前主控台 Session 的代理。跨 Session 不繼承匿名管線，改用隨機名稱、SYSTEM 專用的本機管線；密碼不寫入命令列。代理以 `OpenInputDesktop` 取得桌面名稱，在對應 `winsta0` 桌面建立 Host。
-- 代理每秒觀察登入、登出、鎖定與解鎖造成的桌面變化；先回收舊 Host 再建立新 Host。服務亦監看主控台 Session 變更。兩層 Job Object 在父程序退出時終止子程序；另以服務目錄的檔案鎖避免重複 Host。桌面切換需要重新連線，不保證無縫串流。
+- 新版代理在同一主控台 Session 的 Default／Winlogon 桌面切換時保留 Host 與 P2P 工作階段，由擷取及輸入的固定執行緒重新綁定桌面；主控台 Session 變更時才回收代理。兩層 Job Object 在父程序退出時終止子程序，另以服務目錄的檔案鎖避免重複 Host。UAC 權限及切換情境的實機驗證界線見 [安全桌面修正](WINDOWS-UAC-2026-10-07.md)。
 - 本機控制管線接受狀態查詢、斷線、已驗證 Host 的 SAS 及官方服務更新交接，拒絕網路登入身分，不提供配對密碼或任意命令。服務 Host 沿用既有 SYSTEM 帳號不可開啟遠端終端機的限制。
-- 停用經 UAC 停止 SCM 服務，等待停止後刪除註冊及專用副本。APP 自動更新會停止並更新服務副本；手動替換檔案或移除程式仍要求先停用服務。一般使用者的站台資料不隨服務移除。
+- 新版關閉登入前啟動只保存執行期間模式，不移除 SCM 服務；APP 有效租約繼續維持 Host。完全移除需再關閉「授權系統操作」，經 UAC 停止 SCM 服務，等待停止後刪除註冊及專用副本。舊版服務尚未支援獨立模式時，關閉登入前啟動仍走原移除流程。APP 自動更新會停止並更新服務副本；手動替換檔案或移除程式仍要求先停用服務。一般使用者的站台資料不隨服務移除。
 - 此次僅做交叉編譯與語法檢查，沒有 Windows 實機測試。仍須驗證 UAC 取消、首次開機、登入／登出、鎖定、快速使用者切換、服務重啟及移除。僅管理實體主控台 Session，不提供多個 RDP 工作階段；不支援 BitLocker 開機前解鎖或安全注意序列 Ctrl+Alt+Del 的合成。
 
 架構依據：[Microsoft 互動式服務](https://learn.microsoft.com/en-us/windows/win32/services/interactive-services)、[CreateProcessAsUser](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasusera)、[SetThreadDesktop](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddesktop)。
@@ -88,3 +88,11 @@ MCP 沒有隨此功能安裝成系統服務，也不會自動啟用；原本的 
 ## 編碼設定同步驗證
 
 完成設定持久化、只更新編碼欄位、重複請求、非法編碼、服務拒絕及本機儲存失敗的 Smoke，並檢查啟用服務時的設定頁操作。macOS 控制管道沿用受保護 helper 的 UID／PID／路徑驗證；Windows 核對 SCM 管線及目前主控台工作階段。這些檢查不等同於已在實機重啟 launchd／SCM 服務；本次不改動正在使用的系統服務。
+
+## 2026-10-07：Windows 執行期間授權
+
+「授權系統操作」與「登入前啟動」分開。首次手動授權安裝受保護的 LocalSystem 服務；登入前啟動關閉時，只有目前主控台 APP 的管線租約能啟動 Host。APP 退出、崩潰、管線失效或工作階段切換時回收，SCM helper 留待下一次 APP 使用。背景服務已安裝不代表開機可接受連線。
+
+新版服務的登入前模式透過固定控制操作持久化，不重複要求 UAC；APP 自動更新仍核對受保護服務、下載官方 Service ZIP，保留配對設定、登入前模式與 SAS 標記。SAS 首次授權亦使用執行期間模式，不把開機連線當成前提；單純 UAC 授權不新增 Windows SAS 原則，且初始停用 YourDesk 的 SAS 功能。
+
+共用租約／回收、設定 API 與真實設定頁 Smoke 已通過，包含取消、重新開啟不詢問、開機設定獨立、SAS 明確授權及舊版服務相容。Windows 模式標記與 ACL 測試保留在 Windows 專用測試中；本機交叉編譯不等於實機執行。完整設計與實機驗收項目見 [UAC 安全桌面](WINDOWS-UAC-2026-10-07.md)。

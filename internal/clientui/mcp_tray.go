@@ -63,7 +63,7 @@ func setMCPVisibility(p *process, visible bool) {
 }
 
 func (s *server) incomingConnected() bool {
-	if prelogin.Status().Enabled {
+	if prelogin.Status().Managed() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		connected, _ := prelogin.Incoming(ctx, false)
@@ -75,7 +75,7 @@ func (s *server) incomingConnected() bool {
 	return p != nil && p.incomingConnected
 }
 func (s *server) disconnectIncoming() error {
-	if prelogin.Status().Enabled {
+	if prelogin.Status().Managed() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, err := prelogin.Incoming(ctx, true)

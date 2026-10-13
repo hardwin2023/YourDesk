@@ -31,9 +31,10 @@ func (c *dxgiCapture) close() {
 }
 func (c *dxgiCapture) fail(hr C.int) error {
 	c.close()
-	c.retry = time.Now().Add(30 * time.Second)
+	delay := dxgiRetryDelay(uint32(hr))
+	c.retry = time.Now().Add(delay)
 	err := fmt.Errorf("DXGI 擷取不可用（HRESULT 0x%08X）", uint32(hr))
-	slog.Warn("Windows 擷取退回 GDI，30 秒後重試", "原因", err)
+	slog.Warn("Windows 擷取退回 GDI，稍後重試", "原因", err, "retryAfter", delay)
 	return err
 }
 func (c *dxgiCapture) capture(bounds image.Rectangle) (image.Image, error) {

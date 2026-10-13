@@ -43,14 +43,19 @@ func requestStreamSettings(ctx context.Context, settings StreamSettings) error {
 }
 
 func authorizeConsoleSettings(conn net.Conn) error {
+	_, err := consoleSettingsIdentity(conn)
+	return err
+}
+
+func consoleSettingsIdentity(conn net.Conn) (updateJob, error) {
 	identity, err := updateClient(conn)
 	if err != nil {
-		return err
+		return identity, err
 	}
 	if identity.Session == 0 || identity.Session == 0xffffffff || identity.Session != windows.WTSGetActiveConsoleSessionId() {
-		return errors.New("請在目前主控台修改服務設定。")
+		return identity, errors.New("請在目前主控台修改服務設定。")
 	}
-	return nil
+	return identity, nil
 }
 
 func saveStreamConfig(path string, config Config) error {

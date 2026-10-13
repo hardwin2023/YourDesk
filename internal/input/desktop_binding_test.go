@@ -82,3 +82,68 @@ func TestInputDesktopDoesNotRebindSameDesktop(t *testing.T) {
 		t.Fatal("同桌面重複綁定或未釋放查詢 handle", bound, closed)
 	}
 }
+
+func TestInputDesktopRebindsAfterAccessAndInjectionFailure(t *testing.T) {
+	var next, active uintptr
+	var bound, delivered []uintptr
+	var openErr, bindErr error
+	name := "Default"
+	b := desktopBinding{
+		open: func() (inputDesktop, error) {
+			if openErr != nil {
+				return inputDesktop{}, openErr
+			}
+			next++
+			return inputDesktop{handle: next, name: name}, nil
+		},
+		bind: func(h uintptr) error {
+			if bindErr != nil {
+				return bindErr
+			}
+			active = h
+			bound = append(bound, h)
+			return nil
+		},
+		close: func(h uintptr) {
+			if h == active {
+				t.Fatal("關閉了仍綁定的輸入桌面")
+			}
+		},
+	}
+	inject := func() error { delivered = append(delivered, active); return nil }
+	if err := b.run(inject); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("安全桌面不允許輸入")
+	openErr = denied
+	for range 100 {
+		if err := b.run(inject); !errors.Is(err, denied) {
+			t.Fatal(err)
+		}
+	}
+	openErr = nil
+	if err := b.run(inject); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(bound, []uintptr{1, 2}) || !reflect.DeepEqual(delivered, []uintptr{1, 2}) {
+		t.Fatal("未重新綁定同名桌面，或重播了拒絕期間的輸入", bound, delivered)
+	}
+	name, bindErr = "Winlogon", denied
+	if err := b.run(inject); !errors.Is(err, denied) {
+		t.Fatal(err)
+	}
+	name, bindErr = "Default", nil
+	if err := b.run(inject); err != nil {
+		t.Fatal(err)
+	}
+	// SendInput 失敗可能只被注入層發現，下個新事件同樣要重新綁定。
+	if err := b.run(func() error { return denied }); !errors.Is(err, denied) {
+		t.Fatal(err)
+	}
+	if err := b.run(inject); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(bound, []uintptr{1, 2, 4, 6}) || !reflect.DeepEqual(delivered, []uintptr{1, 2, 4, 6}) {
+		t.Fatal("綁定／注入錯誤後仍使用舊桌面，或重新注入了失敗事件", bound, delivered)
+	}
+}

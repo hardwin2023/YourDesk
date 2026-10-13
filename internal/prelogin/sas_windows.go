@@ -19,7 +19,7 @@ import (
 func SecureAttentionAvailable() bool { return requireServiceProcess() == nil }
 func SendSecureAttention(ctx context.Context) error {
 	if !SecureAttentionAvailable() {
-		return errors.New("請先在遠端 Windows 啟用未登入開機服務，再重新連線。")
+		return errors.New("請先在遠端 Windows 授權系統操作與 Ctrl+Alt+Del，再重新連線。")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()

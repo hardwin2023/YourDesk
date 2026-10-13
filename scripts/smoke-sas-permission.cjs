@@ -1,7 +1,7 @@
 // 真實設定頁及關閉事件；隔離 API，啟動不詢問，只有手動開啟 Switch 才能觸發授權。
 const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'../internal/clientui/web'),origin='https://yourdesk-sas.test';
-const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},library:{groups:[],sites:[]},preferences:{language:'zh-Hant',theme:'light',selectedGroup:'*'},running:{host:true},sessions:{},updates:{},hardwareDetection:{status:'complete'},audioCapabilities:[],prelogin:{supported:true,sasSupported:true,enabled:false,sasAllowed:false}});
+const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},library:{groups:[],sites:[]},preferences:{language:'zh-Hant',theme:'light',selectedGroup:'*'},running:{host:true},sessions:{},updates:{},hardwareDetection:{status:'complete'},audioCapabilities:[],prelogin:{supported:true,desktopAccessSupported:true,runtimeProtocol:1,installed:false,sasSupported:true,enabled:false,sasAllowed:false}});
 (async()=>{const browser=await chromium.launch({headless:true});try{
  let state=defaults(),requests=[],errors=[],context,page,failToggle=false;
  async function reopen(){
@@ -22,7 +22,9 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
      state.prelogin.sasDisabled=!body.enabled;
     }else if(request.method()==='POST'&&url.pathname==='/api/prelogin'){
      const body=request.postDataJSON();requests.push({path:url.pathname,body});
-     state.prelogin.enabled=true;state.prelogin.sasAllowed=true;
+     if(body.secureAttention){state.prelogin.installed=true;state.prelogin.sasAllowed=true;}
+     else if(body.desktopAccess){state.prelogin.installed=body.enabled;}
+     else state.prelogin.enabled=body.enabled;
     }
     return route.fulfill({json:value});
    }
@@ -42,7 +44,7 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
   assert(!(await page.locator('#confirm-dialog').isVisible()),'開啟進階設定不應自動詢問授權');
   await page.locator('#authorize-sas').click();
   await page.locator('#confirm-dialog').waitFor({state:'visible'});
-  assert.match(await page.locator('#confirm-description').textContent(),/開機自動啟動/);
+  assert.match(await page.locator('#confirm-description').textContent(),/不會開啟登入前啟動/);
   assert.equal(serviceRequests().length,0);
   if(close==='escape')await page.keyboard.press('Escape');
   else await page.locator(close==='cancel'?'#confirm-dialog .modal-actions .close':'#confirm-dialog .modal-heading .close').click();
@@ -62,13 +64,42 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
   assert.equal(serviceRequests().length,1);assert.deepEqual(serviceRequests()[0].body,{enabled:true,secureAttention:true});
   assert.equal(await page.locator('#authorize-sas').getAttribute('role'),'switch');assert(await page.locator('#authorize-sas').isChecked());
   await page.locator('#authorize-sas').uncheck();await page.waitForFunction(()=>!document.querySelector('#authorize-sas').disabled);
-  assert(state.prelogin.sasDisabled);assert(state.prelogin.enabled);assert.equal(serviceRequests().length,1);
+  assert(state.prelogin.sasDisabled);assert(state.prelogin.installed);assert(!state.prelogin.enabled);assert.equal(serviceRequests().length,1);
   await reopen();assert(!(await page.locator('#confirm-dialog').isVisible()));
   await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
   assert(!(await page.locator('#authorize-sas').isChecked()));
   await page.locator('#authorize-sas').check();await page.waitForFunction(()=>!document.querySelector('#authorize-sas').disabled);
   assert(!state.prelogin.sasDisabled);assert.equal(serviceRequests().length,1,'已授權的開關不應再次要求管理員授權');
  }
+ // 系統操作授權與開機連線分開；取消不安裝，SAS 原則不隨 UAC 授權變動。
+ state=defaults();requests=[];await reopen();
+ await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
+ assert.equal(await page.locator('#ui-desktop-access').getAttribute('role'),'switch');
+ await page.locator('#ui-desktop-access').click();
+ await page.locator('#confirm-dialog').waitFor({state:'visible'});
+ assert.match(await page.locator('#confirm-description').textContent(),/UAC 安全桌面/);
+ assert.match(await page.locator('#confirm-description').textContent(),/APP 關閉後停止/);
+ await page.locator('#confirm-dialog .modal-actions .close').click();
+ assert.equal(serviceRequests().length,0);assert(!(await page.locator('#ui-desktop-access').isChecked()));
+ await page.locator('#ui-desktop-access').click();await page.locator('#confirm-form button[type="submit"]').click();
+ await page.waitForFunction(()=>!document.querySelector('#confirm-dialog').open);
+ assert.deepEqual(serviceRequests().map(r=>r.body),[{enabled:true,desktopAccess:true}]);
+ assert(await page.locator('#ui-desktop-access').isChecked());assert(!(await page.locator('#ui-prelogin').isChecked()));
+ assert(!state.prelogin.sasAllowed);assert(!(await page.locator('#authorize-sas').isChecked()));
+ await reopen();assert(!(await page.locator('#confirm-dialog').isVisible()));
+ await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
+ await page.locator('#ui-prelogin').check();await page.waitForFunction(()=>document.querySelector('#ui-desktop-access').disabled);
+ assert(await page.locator('#ui-desktop-access').isChecked());assert.equal(serviceRequests().length,2);
+ assert.deepEqual(serviceRequests()[1].body,{enabled:true});
+ await page.locator('#ui-prelogin').uncheck();await page.waitForFunction(()=>!document.querySelector('#ui-desktop-access').disabled);
+ assert(state.prelogin.installed);assert(!state.prelogin.enabled);assert(await page.locator('#ui-desktop-access').isChecked());
+ await page.locator('#ui-desktop-access').click();await page.locator('#confirm-form button[type="submit"]').click();
+ await page.waitForFunction(()=>!document.querySelector('#confirm-dialog').open);
+ assert(!state.prelogin.installed);assert.deepEqual(serviceRequests().at(-1).body,{enabled:false,desktopAccess:true});
+ // 非 Windows 不顯示這個授權開關。
+ state=defaults();state.info.platform='darwin';state.prelogin={supported:true,enabled:false};requests=[];await reopen();
+ await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
+ assert(!(await page.locator('#desktop-access-row').isVisible()));assert.equal(serviceRequests().length,0);
  // 不論舊版有沒有儲存「不再詢問」，啟動與輪詢都不得自動要求授權。
  for(const service of [
   {supported:true,sasSupported:true,enabled:false,sasAllowed:false},
@@ -93,5 +124,5 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
  fs.mkdirSync(path.resolve(__dirname,'../.local-run'),{recursive:true});
  await page.locator('#settings-dialog').screenshot({path:path.resolve(__dirname,'../.local-run/sas-switch-smoke.png')});
  assert.deepEqual(errors,[]);
- console.log('PASS: 首次啟動／重開／狀態輪詢均不詢問、不受舊偏好影響、手動開啟並確認才提權、取消／關閉／Esc 不呼叫服務、Switch 狀態保留、已授權切換不重複提權、失敗還原');
+ console.log('PASS: 首次啟動／重開／狀態輪詢均不詢問、不受舊偏好影響、手動開啟並確認才提權、UAC 與開機連線獨立、UAC 不變更 SAS 原則、Mac 隱藏 UAC 開關、取消／關閉／Esc 不呼叫服務、Switch 狀態保留、已授權切換不重複提權、失敗還原');
 }finally{await browser.close()}})().catch(error=>{console.error(error);process.exitCode=1});

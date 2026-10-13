@@ -39,7 +39,7 @@ func servicePaths() (root, executable string, err error) {
 }
 
 func Status() State {
-	s := State{Supported: true, Message: serviceHint, SASSupported: true, SASAllowed: secureAttentionPolicyAllowed(), SASDisabled: secureAttentionDisabled()}
+	s := State{Supported: true, DesktopAccessSupported: true, Message: serviceHint, SASSupported: true, SASAllowed: secureAttentionPolicyAllowed(), SASDisabled: secureAttentionDisabled()}
 	// WinPE 不安裝持久服務。
 	if key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\MiniNT`, registry.QUERY_VALUE); err == nil {
 		key.Close()
@@ -51,7 +51,15 @@ func Status() State {
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		// 保留目錄表示服務存在或尚待清理，避免 APP 啟動第二份 Host。
-		s.Enabled = true
+		s.Installed = true
+		s.Enabled, err = desktopAutostart(root)
+		if err != nil {
+			s.Error = "無法確認系統服務模式，請檢查服務安裝。"
+		}
+		if marker, e := readDesktopMarker(root, desktopControlMarker); e == nil && string(marker) == "1" {
+			s.RuntimeProtocol = 1
+			s.Message = "開啟後可在登入前接受遠端連線；關閉後只在 APP 執行期間提供系統操作。"
+		}
 		var public struct {
 			Room string `json:"room"`
 		}
@@ -65,6 +73,10 @@ func Status() State {
 }
 
 func Configure(ctx context.Context, enabled bool, c Config) error {
+	state := Status()
+	if state.Installed && state.RuntimeProtocol == 1 {
+		return requestDesktopAutostart(ctx, enabled)
+	}
 	// 登入前服務及 SAS 共用第一次安裝授權，避免稍後再跳一次 UAC。
 	return configureWindows(ctx, enabled, c, true)
 }
@@ -73,17 +85,17 @@ func ConfigureSecureAttention(ctx context.Context, c Config) error {
 	if !state.SASSupported {
 		return errors.New("這台電腦不支援 Ctrl+Alt+Del 授權。")
 	}
-	if state.Enabled && state.SASAllowed {
+	if state.Managed() && state.SASAllowed {
 		if state.SASDisabled {
 			return SetSecureAttentionEnabled(ctx, true)
 		}
 		return nil
 	}
 	var err error
-	if state.Enabled {
+	if state.Managed() {
 		err = elevateWindows(ctx, "sas-enable", "")
 	} else {
-		err = configureWindows(ctx, true, c, true)
+		err = configureWindowsMode(ctx, true, c, "install-runtime-sas")
 	}
 	if err != nil {
 		return errors.New("Ctrl+Alt+Del 授權未完成；請確認管理員允許，並檢查系統管理原則。")
@@ -97,6 +109,14 @@ func ConfigureSecureAttention(ctx context.Context, c Config) error {
 	return nil
 }
 func configureWindows(ctx context.Context, enabled bool, c Config, sas bool) error {
+	mode := "install"
+	if sas {
+		mode = "install-sas"
+	}
+	return configureWindowsMode(ctx, enabled, c, mode)
+}
+
+func configureWindowsMode(ctx context.Context, enabled bool, c Config, installMode string) error {
 	if !Status().Supported {
 		return errors.New(Status().Message)
 	}
@@ -124,10 +144,7 @@ func configureWindows(ctx context.Context, enabled bool, c Config, sas bool) err
 		if err = secureWrite(path, data, sddl); err != nil {
 			return errors.New(serviceFailed)
 		}
-		mode = "install"
-		if sas {
-			mode = "install-sas"
-		}
+		mode = installMode
 	}
 	if err := elevateWindows(ctx, mode, path); err != nil {
 		slog.Warn("登入前服務操作未完成", "operation", mode, "error", err)
@@ -186,6 +203,10 @@ func secureWrite(path string, data []byte, sddl string) error {
 }
 
 func install(path string) error {
+	return installService(path, true)
+}
+
+func installService(path string, autostart bool) error {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return errors.New(serviceFailed)
 	}
@@ -264,11 +285,21 @@ func install(path string) error {
 	if err = secureWrite(filepath.Join(root, "host.lock"), nil, "D:P(A;;FA;;;SY)(A;;FA;;;BA)"); err != nil {
 		return err
 	}
+	// 必須在啟動 SCM 服務之前寫入，避免首次授權就意外啟用開機連線。
+	if err = saveDesktopAutostart(root, autostart); err != nil {
+		return err
+	}
+	if !autostart {
+		// UAC 授權不沿用其他程式的 SAS 開關；只有明確授權 SAS 才開啟。
+		if err = secureWrite(filepath.Join(root, "sas.disabled"), nil, desktopMarkerACL); err != nil {
+			return err
+		}
+	}
 	public, _ := json.Marshal(map[string]string{"room": c.Room})
 	if err = os.WriteFile(filepath.Join(root, "public.json"), public, 0644); err != nil {
 		return err
 	}
-	s, err := m.CreateService(serviceName, executable, mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, ServiceStartName: "LocalSystem", DisplayName: "YourDesk 登入前啟動", Description: "開機後自動啟動 YourDesk，提供登入前與登入後的遠端連線。"}, "--prelogin", "daemon")
+	s, err := m.CreateService(serviceName, executable, mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, ServiceStartName: "LocalSystem", DisplayName: "YourDesk 系統操作服務", Description: "提供已授權的系統桌面操作；僅在 APP 執行或開啟登入前啟動時接受連線。"}, "--prelogin", "daemon")
 	if err != nil {
 		return err
 	}

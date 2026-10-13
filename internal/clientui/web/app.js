@@ -238,17 +238,19 @@ function applySiteCapabilities(card,site) {
  }
  const diagnostic=card.querySelector('[data-connect-mode="diagnostics"]');if(diagnostic)diagnostic.disabled=recovering||siteCapability(site,'desktop')===false;
 }
+function serviceManaged(service) { return !!(service?.installed||service?.enabled); }
 function renderDevice() {
  $('#stop-incoming').hidden=!state.incomingConnected;
   const { info, running } = state;
-  $('#device-room').textContent = state.prelogin?.enabled && state.prelogin.room ? state.prelogin.room : info.room;
+  const managed=serviceManaged(state.prelogin);
+  $('#device-room').textContent = managed && state.prelogin.room ? state.prelogin.room : info.room;
   $('#footer-version').textContent = info.version;
-  $('#local-secret').value = state.prelogin?.enabled ? '' : info.secret;
- $('#local-secret').placeholder=state.prelogin?.enabled?i18n.t('服務模式使用啟用時的密碼'):'';
- $('#toggle-secret').disabled=!!state.prelogin?.enabled;
+  $('#local-secret').value = managed ? '' : info.secret;
+ $('#local-secret').placeholder=managed?i18n.t('服務模式使用啟用時的密碼'):'';
+ $('#toggle-secret').disabled=managed;
   $('#password-reminder').hidden = info.passwordNeedsChange !== 'true' || passwordReminderDismissed;
   const active = Object.hasOwn(running, 'host');
-  $('#host-status').textContent = state.prelogin?.enabled ? i18n.t('未登入連線服務模式') : active ? i18n.t('一切就緒') : i18n.t('無法連線');
+  $('#host-status').textContent = managed ? i18n.t(state.prelogin.enabled?'未登入連線服務模式':'系統操作服務模式') : active ? i18n.t('一切就緒') : i18n.t('無法連線');
   $('.local-badge').dataset.tooltip = `${info.hostname} · ${info.platform} / ${info.architecture}`;
 
 }
@@ -1532,14 +1534,14 @@ let preloginWasBusy=false, sasToggleBusy=false, sasToggleTarget=false;
 function requestSASPermission(){
  const service=state?.prelogin;
  if(!service?.sasSupported||service.busy)return;
- const message=service.enabled?'允許 YourDesk 服務傳送 Ctrl+Alt+Del？接著會要求 Windows 管理員授權。':'允許 YourDesk 傳送 Ctrl+Alt+Del？將啟用登入前連線服務及開機自動啟動，接著會要求 Windows 管理員授權。';
+ const message=serviceManaged(service)?'允許 YourDesk 服務傳送 Ctrl+Alt+Del？接著會要求 Windows 管理員授權。':'允許 YourDesk 傳送 Ctrl+Alt+Del？將安裝系統操作服務，接著會要求 Windows 管理員授權；不會開啟登入前啟動。';
  confirmDelete(i18n.t('授權 Ctrl+Alt+Del'),i18n.t(message),async()=>{await api('prelogin','POST',{enabled:true,secureAttention:true});await updateRunning();});
  $('#confirm-form button[type="submit"]').textContent=i18n.t('授權');
 }
 $('#authorize-sas').addEventListener('change',()=>{
  const toggle=$('#authorize-sas'),service=state?.prelogin,enabled=toggle.checked;
  if(busy||sasToggleBusy||!service?.sasSupported||service.busy){renderPrelogin();return;}
- if(enabled&&(!service.enabled||!service.sasAllowed)){
+ if(enabled&&(!serviceManaged(service)||!service.sasAllowed)){
   toggle.checked=false;requestSASPermission();return;
  }
  sasToggleBusy=true;sasToggleTarget=enabled;renderPrelogin();
@@ -1558,12 +1560,25 @@ function renderPrelogin() {
  $('#prelogin-progress').textContent=service?.busy ? i18n.t(service.message) : '';
  if (!service?.busy && preloginWasBusy && service?.error) toast(i18n.t(service.error),false,{warning:true,duration:15000});
  preloginWasBusy=!!service?.busy;
- const ready=!!service?.enabled&&!!service?.sasAllowed&&!service?.sasDisabled;
+ const ready=serviceManaged(service)&&!!service?.sasAllowed&&!service?.sasDisabled;
+ const desktopToggle=$('#ui-desktop-access'),desktopRow=$('#desktop-access-row');
+ desktopRow.hidden=!service?.desktopAccessSupported;
+ desktopToggle.checked=serviceManaged(service);
+ desktopToggle.disabled=!service?.desktopAccessSupported||!!service?.busy||!!service?.enabled;
+ desktopRow.dataset.tooltip=i18n.t(service?.enabled?'請先關閉登入前啟動，再移除系統操作授權。':'首次授權需管理員允許；登入前啟動關閉時，只在 APP 執行期間接受遠端連線。');
  $('#sas-permission-row').hidden=!service?.sasSupported;
  $('#authorize-sas').checked=sasToggleBusy?sasToggleTarget:ready;
  $('#authorize-sas').disabled=!service?.sasSupported||!!service?.busy||sasToggleBusy;
  // 啟動及背景輪詢只呈現狀態；授權只由使用者手動開啟 Switch 觸發。
 }
+$('#ui-desktop-access').addEventListener('change',()=>{
+ const toggle=$('#ui-desktop-access'),service=state?.prelogin,enabled=toggle.checked;
+ renderPrelogin();
+ if(busy||!service?.desktopAccessSupported||service.busy||service.enabled)return;
+ const message=enabled?'允許 YourDesk 控制 Windows UAC 安全桌面？將安裝受保護的系統操作服務，接著會要求管理員授權。登入前啟動保持關閉，APP 關閉後停止遠端連線。':'移除 YourDesk 系統操作服務？接著會要求管理員授權，遠端控制將回到一般使用者模式。';
+ confirmDelete(i18n.t(enabled?'授權系統操作':'移除系統操作授權'),i18n.t(message),async()=>{await api('prelogin','POST',{enabled,desktopAccess:true});await updateRunning();});
+ $('#confirm-form button[type="submit"]').textContent=i18n.t(enabled?'授權':'移除');
+});
 $('#ui-prelogin').addEventListener('change',()=>action(async()=>{
  const toggle=$('#ui-prelogin');
  const enabled=toggle.checked;

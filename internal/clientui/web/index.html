@@ -50,6 +50,7 @@
           <section id="settings-panel-advanced" role="tabpanel" aria-labelledby="settings-tab-advanced" tabindex="0" hidden>
             <h3 class="settings-panel-title">進階設定</h3>
             <div class="preference-row experimental-unavailable" tabindex="0" data-tooltip="登入系統前也能接受遠端連線；目前不支援。"><label for="ui-prelogin"><span>登入前啟動</span> <span class="experimental-badge">實驗性功能</span></label><input id="ui-prelogin" class="preference-switch" type="checkbox" role="switch" disabled aria-describedby="prelogin-access-reason"><span id="prelogin-access-reason" class="help-description">登入系統前也能接受遠端連線；目前不支援。</span></div>
+            <div id="desktop-access-row" class="preference-row" hidden data-tooltip="首次授權需管理員允許；登入前啟動關閉時，只在 APP 執行期間接受遠端連線。"><label for="ui-desktop-access">授權系統操作</label><input id="ui-desktop-access" class="preference-switch" type="checkbox" role="switch"></div>
             <div id="sas-permission-row" class="preference-row" hidden data-tooltip="關閉只停用 YourDesk 傳送 Ctrl+Alt+Del，不會關閉登入前服務。"><label for="authorize-sas">授權 Ctrl+Alt+Del</label><input id="authorize-sas" class="preference-switch" type="checkbox" role="switch"></div>
             <p id="prelogin-progress" class="form-note" role="status" aria-live="polite"></p>
             <div class="preference-row"><label for="ui-hints">顯示使用提示</label><input id="ui-hints" class="preference-switch" type="checkbox" role="switch" checked></div>

@@ -17,27 +17,35 @@ type desktopBinding struct {
 	bind    func(uintptr) error
 	close   func(uintptr)
 	current inputDesktop
+	stale   bool
 }
 
 func (b *desktopBinding) run(inject func() error) error {
 	next, err := b.open()
 	if err != nil {
+		b.stale = true
 		return fmt.Errorf("無法取得目前輸入桌面：%w", err)
 	}
 	// 同一 window station 內桌面名稱唯一；同桌面只關閉新開啟的
 	// 查詢 handle，避免不斷重新綁定仍在使用的桌面 handle。
-	if b.current.handle != 0 && strings.EqualFold(next.name, b.current.name) {
+	if b.current.handle != 0 && !b.stale && strings.EqualFold(next.name, b.current.name) {
 		b.close(next.handle)
-		return inject()
+		err := inject()
+		b.stale = err != nil
+		return err
 	}
 	if err := b.bind(next.handle); err != nil {
+		b.stale = true
 		b.close(next.handle)
 		return fmt.Errorf("無法切換輸入執行緒的桌面：%w", err)
 	}
 	previous := b.current
 	b.current = next
+	b.stale = false
 	if previous.handle != 0 {
 		b.close(previous.handle)
 	}
-	return inject()
+	err = inject()
+	b.stale = err != nil
+	return err
 }

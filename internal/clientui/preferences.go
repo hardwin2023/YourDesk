@@ -16,7 +16,7 @@ func (s *server) storePreferences(ctx context.Context, preferences Preferences, 
 		return errors.New("未登入服務正在變更，請稍候。")
 	}
 	if managed && networkChanged {
-		return errors.New("請先停用未登入開機，再修改 IP 直連或 Tailcat 模式。")
+		return errors.New("請先停用系統服務，再修改 IP 直連或 Tailcat 模式。")
 	}
 	startedMCP := false
 	if preferences.MCPEnabled && s.mcpStop == nil {
