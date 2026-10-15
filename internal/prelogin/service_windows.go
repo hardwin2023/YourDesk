@@ -56,8 +56,8 @@ func Status() State {
 		if err != nil {
 			s.Error = "無法確認系統服務模式，請檢查服務安裝。"
 		}
-		if marker, e := readDesktopMarker(root, desktopControlMarker); e == nil && string(marker) == "1" {
-			s.RuntimeProtocol = 1
+		s.RuntimeProtocol = int(desktopRuntimeControl.protocol.Load())
+		if s.RuntimeProtocol == 1 {
 			s.Message = "開啟後可在登入前接受遠端連線；關閉後只在 APP 執行期間提供系統操作。"
 		}
 		var public struct {
@@ -74,8 +74,11 @@ func Status() State {
 
 func Configure(ctx context.Context, enabled bool, c Config) error {
 	state := Status()
-	if state.Installed && state.RuntimeProtocol == 1 {
-		return requestDesktopAutostart(ctx, enabled)
+	if state.Installed {
+		// 每次變更向已驗證的服務確認操作；更新回復可能留下新版能力標記。
+		return setInstalledDesktopAutostart(enabled, func(next bool) error {
+			return requestDesktopAutostart(ctx, next)
+		}, func() error { return configureWindows(ctx, false, c, false) })
 	}
 	// 登入前服務及 SAS 共用第一次安裝授權，避免稍後再跳一次 UAC。
 	return configureWindows(ctx, enabled, c, true)

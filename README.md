@@ -14,7 +14,7 @@ YourDesk 提供 macOS／Windows 遠端桌面工具與 Android 手機 Viewer，�
 - **Android 手機操作**：支援雙指縮放與拖移、長按右鍵、遠端捲動、多螢幕切換、遠端聲音及 Shell；可手動新增站台或掃描 QR Code 匯入。[功能、操作與限制](docs/ANDROID-BUILD.md)。
 - **獨立檔案傳輸**：macOS／Windows 以專用視窗瀏覽遠端磁碟、複選上傳與下載、建立目錄及確認後永久刪除；資料夾優先、隱藏項目不顯示，支援暫停、手動重連續傳及進度顯示。下載直接選擇本機目的資料夾，不需開啟遠端桌面或同步剪貼簿；[操作與限制](docs/FILE-TRANSFER.md)。
 - **MCP AI Agent 遠端操控**：AI Agent 可透過 MCP 連線遠端、操作桌面或命令列、查詢站台能力，完成工作後斷線。
-- **硬體編解碼加速**：支援 macOS H.264／HEVC 與 Windows H.264／AV1 正式硬體編碼路徑，Windows 另提供 H.264／HEVC／AV1 軟解；依兩端裝置能力自動選擇，無法使用時切換備援路徑，工具列可查看實際編解碼狀態。
+- **硬體編解碼加速**：支援 macOS H.264／HEVC 與 Windows H.264／HEVC／AV1 正式硬體編碼路徑，Windows 另提供 H.264／HEVC／AV1 軟解；依兩端裝置與驅動能力選擇，無法使用或持續解碼過載時協商備援格式，工具列可查看實際編解碼狀態。
 - **遠端聲音（實驗性）**：預設關閉，使用 Opus 並跟隨影像品質設定；可選自動、AAC 硬體、Opus、AAC 軟體或 PCM，依兩端可用能力協商；[聲音設定](docs/REMOTE-AUDIO.md)。
 - **跨平台遠端操作**：在 Mac 與 Windows 之間操作桌面，支援鍵盤、滑鼠與常用快捷鍵。
 - **快速連線與站台管理**：輸入遠端 ID 即可連線，也能儲存常用站台、分組、拖曳排序及匯入／匯出。
@@ -48,6 +48,8 @@ IP 白名單預設開啟且只允許 `127.0.0.1`；名單內免 Token、名單�
 桌面版從 [GitHub Releases](https://github.com/VaderChen/YourDesk/releases/latest) 下載；手機版請使用 [Android 1.26.1003 build 2028 發行頁](https://github.com/VaderChen/YourDesk/releases/tag/1.26.1003-build-2028)。
 
 本文件介紹原始碼提供的功能；已發布安裝包實際包含的功能，請以對應發行說明為準。
+
+尚未發行的原始碼修正與驗證限制，見[待發行修正](docs/RELEASE-NEXT-DRAFT.md)。
 
 | 平台 | 下載套件 |
 | --- | --- |
@@ -83,9 +85,12 @@ macOS 使用遠端桌面時需允許「螢幕錄製」與「輔助使用」權�
 
 可在「關於」手動檢查更新。按下「下載並自動更新」後，下載完成會以紅字倒數 10 秒；期間可取消或按「立即更新」。倒數結束後自動結束程式、安裝新版並重新啟動；遠端連線會中斷。若無法自動安裝，可依提示手動安裝。建議兩端保持最新版，以使用完整功能。
 
+「關於 → 本地更新」可選 Windows 完整 Portable ZIP 或 macOS DMG，離線升版、同版重裝或回退。驗證後按「開始更新」才關閉、同步替換 APP／已安裝服務並重開，保留設定與服務模式；Windows 本地套件更新受保護服務時需本次 UAC 授權。舊版沒有此按鈕時，仍須先手動安裝；Windows 手動替換 ZIP 前請先移除系統服務，避免只更換 APP 而留下不同版本的服務副本。詳見[本地離線更新](docs/LOCAL-UPDATE.md)。
+
 ## 更多資訊
 
 - [連線測速與分析](docs/CONNECTION-DIAGNOSTICS.md) · [串流設定與相容性](docs/STREAMING-CONTROLS.md)
+- [本地離線更新與回退](docs/LOCAL-UPDATE.md) · [Windows 卡頓與驗證紀錄](docs/WINDOWS-IDLE-INPUT.md)
 - [桌面檔案傳輸](docs/FILE-TRANSFER.md) · [遠端命令列](docs/TERMINAL.md)
 - [建置與打包](docs/BUILD.md) · [架構說明](docs/ARCHITECTURE.md)
 - [Android Viewer 發行、簽章與測試](docs/ANDROID-BUILD.md) · [記憶體最佳化紀錄](docs/MEMORY-OPTIMIZATION-2026-09-19.md)

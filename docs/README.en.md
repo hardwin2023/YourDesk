@@ -14,7 +14,7 @@ YourDesk is a remote desktop app for macOS and Windows. Connect to another compu
 - **Dedicated desktop file transfer:** browse remote disks, select multiple files for upload/download, create folders and confirm permanent deletion. Folders appear first and hidden items are omitted. Choose the local download folder directly, with pause, manual resume and progress controls. Available on macOS and Windows without screen capture or a shell.
 - **Remote audio (experimental):** off by default, with Opus and the existing video quality settings. Auto prefers AAC hardware, Opus, AAC software, then PCM according to both ends. See [audio settings](REMOTE-AUDIO.md).
 - **Remote control through MCP AI agents:** AI agents can connect through MCP, operate the desktop or terminal, query site capabilities and disconnect when finished.
-- **Hardware-accelerated encoding and decoding:** supports H.264/HEVC on macOS and H.264 on Windows, selected automatically according to both devices' capabilities. Falls back when unavailable; the toolbar shows the actual encoding and decoding status.
+- **Hardware-accelerated encoding and decoding:** supports H.264/HEVC on macOS and H.264/HEVC/AV1 hardware encoding on Windows, with H.264/HEVC/AV1 software decoding on Windows. Selection depends on both devices and their drivers; unavailable formats or sustained decode overload trigger fallback negotiation. The toolbar shows the actual encoding and decoding status.
 - **Cross-platform control:** use your keyboard, mouse and common shortcuts between Mac and Windows.
 - **Quick connections:** enter a remote ID or open a saved connection. Group, reorder, import and export saved connections.
 - **Copy and paste:** transfer text, images, files and folders using shortcuts or the system context menu. File and folder batches support up to 2 GiB.
@@ -74,6 +74,8 @@ Experimental **2× interpolation** can improve motion smoothness on Apple Silico
 Copy on one computer and paste on the other. The operating system handles file and folder paste progress. Closing Remote Display returns to the main window; closing the main window leaves YourDesk in the tray. Use the tray's Quit action or Cmd+Q on macOS to exit completely.
 
 Check for updates in About. After downloading, a red 10-second countdown lets you cancel or update immediately. When it ends, the app quits, installs the update and restarts automatically. If automatic installation fails, follow the instructions to install manually. Keep both computers updated for full functionality.
+
+About → Local update accepts a complete Windows Portable ZIP or macOS DMG for offline upgrades, same-version reinstalls and rollbacks. Verification finishes before you confirm installation; the app and installed service are replaced together, preserving settings and service modes, then the app restarts. Updating a protected Windows service from a local package requires UAC approval for that update. Older versions without this button need a manual upgrade first; remove the Windows system service before manually replacing ZIP contents to avoid mismatched app and service copies. See [local offline updates](LOCAL-UPDATE.md) and [unreleased changes and validation limits](RELEASE-NEXT-DRAFT.md).
 
 ## Dedicated file transfer
 

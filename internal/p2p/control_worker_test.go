@@ -5,15 +5,16 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"yourdesk/internal/eventqueue"
 )
 
 func TestControlWorkerStallWithoutQueueOverflow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		done, release := make(chan struct{}), make(chan struct{})
-		inbox := make(chan Control, 1)
+		inbox := eventqueue.New(1, CanCoalesceMoves)
 		var failures atomic.Int32
 		go runControlWorker(done, inbox, func(Control) { <-release }, func() { failures.Add(1); close(done) })
-		inbox <- Control{Type: "key"}
+		inbox.Push(Control{Type: "key"}, 0)
 		synctest.Wait()
 		time.Sleep(29 * time.Second)
 		synctest.Wait()
@@ -34,11 +35,11 @@ func TestControlWorkerIdleAndRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		done := make(chan struct{})
 		defer close(done)
-		inbox := make(chan Control, 1)
+		inbox := eventqueue.New(1, CanCoalesceMoves)
 		var completed atomic.Int32
 		go runControlWorker(done, inbox, func(Control) { time.Sleep(5 * time.Second); completed.Add(1) }, func() { t.Error("healthy worker declared stalled") })
 		for range 3 {
-			inbox <- Control{Type: "key"}
+			inbox.Push(Control{Type: "key"}, 0)
 			time.Sleep(10 * time.Second)
 		}
 		time.Sleep(time.Hour)
@@ -52,9 +53,9 @@ func TestControlWorkerIdleAndRecovery(t *testing.T) {
 func TestControlWorkerCancellationDuringHandler(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		done, release := make(chan struct{}), make(chan struct{})
-		inbox := make(chan Control, 1)
+		inbox := eventqueue.New(1, CanCoalesceMoves)
 		go runControlWorker(done, inbox, func(Control) { <-release }, func() { t.Error("timeout after cancellation") })
-		inbox <- Control{Type: "key"}
+		inbox.Push(Control{Type: "key"}, 0)
 		synctest.Wait()
 		close(done)
 		time.Sleep(time.Minute)

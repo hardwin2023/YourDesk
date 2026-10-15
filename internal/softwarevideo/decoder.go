@@ -84,50 +84,93 @@ static int yd_sw_decode(yd_sw_decoder *d, const unsigned char *data, int size, u
 */
 import "C"
 import (
+	"context"
+	"errors"
 	"fmt"
 	"image"
-	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
+	"yourdesk/internal/ownedworker"
 )
 
 type Decoder struct {
-	mu     sync.Mutex
-	native *C.yd_sw_decoder
+	worker *ownedworker.Worker[*C.yd_sw_decoder, decodeResult]
 	codec  int
 }
 
+type decodeResult struct {
+	image *image.RGBA
+	err   error
+}
+
+// 相同後端逾時後，本次程序不再建立可能停滯的原生工作者。
+var stalledDecoders atomic.Uint32
+
+const decodeTimeout = 5 * time.Second
+
 func New(codec int) (*Decoder, error) {
-	d := C.yd_sw_open(C.int(codec))
-	if d == nil {
-		return nil, fmt.Errorf("FFmpeg CPU 解碼器不可用：%d", codec)
+	if codec < 1 || codec > 4 || stalledDecoders.Load()&(1<<codec) != 0 {
+		return nil, fmt.Errorf("FFmpeg 解碼器不可用或已因逾時停用：%d", codec)
 	}
-	return &Decoder{native: d, codec: codec}, nil
+	ctx, cancel := context.WithTimeout(context.Background(), decodeTimeout)
+	defer cancel()
+	w, err := ownedworker.New[*C.yd_sw_decoder, decodeResult](ctx, func() (*C.yd_sw_decoder, error) {
+		d := C.yd_sw_open(C.int(codec))
+		if d == nil {
+			return nil, fmt.Errorf("FFmpeg CPU 解碼器不可用：%d", codec)
+		}
+		return d, nil
+	}, func(d *C.yd_sw_decoder) { C.yd_sw_close(d) })
+	if err != nil {
+		if errors.Is(err, ownedworker.ErrStalled) {
+			stalledDecoders.Or(1 << codec)
+		}
+		return nil, err
+	}
+	return &Decoder{worker: w, codec: codec}, nil
 }
 func (d *Decoder) Decode(data []byte) (*image.RGBA, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.native == nil || len(data) == 0 || len(data) > 32<<20 {
+	if len(data) == 0 || len(data) > 32<<20 {
 		return nil, fmt.Errorf("無效軟解工作階段或影格")
 	}
-	var out *C.uchar
-	var w, h C.int
-	status := C.yd_sw_decode(d.native, (*C.uchar)(unsafe.Pointer(&data[0])), C.int(len(data)), &out, &w, &h)
-	if out != nil {
-		defer C.av_free(unsafe.Pointer(out))
+	// 逾時返回時，原生呼叫仍可能尚未讀完輸入。
+	data = append([]byte(nil), data...)
+	ctx, cancel := context.WithTimeout(context.Background(), decodeTimeout)
+	defer cancel()
+	r, err := d.worker.Call(ctx, func(native *C.yd_sw_decoder) decodeResult {
+		var out *C.uchar
+		var w, h C.int
+		status := C.yd_sw_decode(native, (*C.uchar)(unsafe.Pointer(&data[0])), C.int(len(data)), &out, &w, &h)
+		if out != nil {
+			defer C.av_free(unsafe.Pointer(out))
+		}
+		if status < 0 {
+			var msg [256]C.char
+			C.av_strerror(status, &msg[0], 256)
+			return decodeResult{err: fmt.Errorf("FFmpeg 軟解失敗：%s", C.GoString(&msg[0]))}
+		}
+		return decodeResult{image: &image.RGBA{Pix: C.GoBytes(unsafe.Pointer(out), w*h*4), Stride: int(w) * 4, Rect: image.Rect(0, 0, int(w), int(h))}}
+	})
+	if err != nil {
+		if errors.Is(err, ownedworker.ErrStalled) {
+			stalledDecoders.Or(1 << d.codec)
+		}
+		return nil, err
 	}
-	if status < 0 {
-		var msg [256]C.char
-		C.av_strerror(status, &msg[0], 256)
-		return nil, fmt.Errorf("FFmpeg 軟解失敗：%s", C.GoString(&msg[0]))
-	}
-	return &image.RGBA{Pix: C.GoBytes(unsafe.Pointer(out), w*h*4), Stride: int(w) * 4, Rect: image.Rect(0, 0, int(w), int(h))}, nil
+	return r.image, r.err
 }
 func (d *Decoder) Close() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	C.yd_sw_close(d.native)
-	d.native = nil
-	return nil
+	if errors.Is(d.worker.Err(), ownedworker.ErrStalled) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := d.worker.Close(ctx)
+	if err != nil {
+		stalledDecoders.Or(1 << d.codec)
+	}
+	return err
 }
 func (d *Decoder) Backend() string {
 	return map[int]string{1: "FFmpeg H.264 CPU", 2: "FFmpeg HEVC CPU", 3: "FFmpeg / libaom AV1 CPU", 4: "VideoToolbox AV1 / FFmpeg"}[d.codec]

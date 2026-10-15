@@ -630,9 +630,16 @@ func main() {
 	g.mu.Unlock()
 	emitUIEvent("authenticated", "")
 	defer func() {
-		if g.connection != nil {
-			g.connection.Close()
-			<-g.connection.done
+		g.mu.RLock()
+		connection := g.connection
+		g.mu.RUnlock()
+		if connection != nil {
+			shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := connection.CloseAndWait(shutdown); err != nil {
+				authlog.Stacks()
+				slog.Warn("遠端顯示 結束清理逾時，停止等待背景工作", "error", err)
+			}
 		}
 	}()
 	go func() {

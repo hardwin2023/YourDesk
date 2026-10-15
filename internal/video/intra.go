@@ -3,6 +3,7 @@ package video
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 	"image"
 	"log/slog"
 	"sync"
@@ -92,37 +93,9 @@ func probeIntraCapabilities() {
 	}
 	for _, cap := range caps {
 		codec := cap.Codec
-		if usable, known := policy.EncoderDecision(decodePolicyCodec(WireForCodec(codec)), 128, 128); known && codec != CodecSoftwareAV1 {
-			cap.Encode = usable
-			if !usable {
-				cap.EncodeError = "本機偵測已確認此尺寸編碼不可用"
-			}
-			intraCaps = append(intraCaps, cap)
-			continue
-		}
-		enc, err := NewIntraEncoder(codec)
-		if err == nil {
-			pixels := image.NewRGBA(image.Rect(0, 0, 128, 128))
-			for i := 3; i < len(pixels.Pix); i += 4 {
-				pixels.Pix[i] = 255
-			}
-			payload, encodeErr := enc.Encode(pixels, 70)
-			if encodeErr != nil {
-				cap.EncodeError = encodeErr.Error()
-			}
-			cap.Encode = encodeErr == nil && len(payload) > 0
-			if cap.Encode && codec == CodecHardwareH264 {
-				_, wireErr := unpackH264(payload)
-				cap.Encode = wireErr == nil
-				if wireErr != nil {
-					cap.EncodeError = wireErr.Error()
-				}
-			}
-			if reporter, ok := enc.(BackendReporter); ok && cap.Encode {
-				slog.Info("硬體編碼能力探測通過", "codec", codec, "backend", reporter.Backend())
-			}
-			enc.Close()
-		} else {
+		usable, err := probeEncoderCapability(codec, policy, NewIntraEncoder)
+		cap.Encode = usable
+		if err != nil {
 			cap.EncodeError = err.Error()
 		}
 		if !cap.Encode {
@@ -133,6 +106,61 @@ func probeIntraCapabilities() {
 		}
 		intraCaps = append(intraCaps, cap)
 	}
+}
+
+// 128×128 與 1080p 分別驗證；小影格失敗不能抹去另一個正式尺寸的成功證據。
+// 是否可用仍由正式 RGBA 編碼結果決定，不把原生診斷矩陣直接當成串流成功。
+func probeEncoderCapability(codec Codec, policy optimization.Policy, create func(Codec) (IntraEncoder, error)) (bool, error) {
+	key := decodePolicyCodec(WireForCodec(codec))
+	if codec == CodecSoftwareAV1 {
+		key = "software-av1"
+	}
+	sizes := []image.Point{{X: 128, Y: 128}, {X: 1920, Y: 1080}}
+	for _, size := range sizes {
+		if usable, known := policy.EncoderDecision(key, size.X, size.Y); known && usable {
+			return true, nil
+		}
+	}
+	var failures []error
+	for _, size := range sizes {
+		if _, known := policy.EncoderDecision(key, size.X, size.Y); known {
+			failures = append(failures, fmt.Errorf("%d×%d 正式編碼實測未通過", size.X, size.Y))
+			continue
+		}
+		enc, err := create(codec)
+		if err != nil {
+			return false, err
+		}
+		pixels := image.NewRGBA(image.Rect(0, 0, size.X, size.Y))
+		for i := 3; i < len(pixels.Pix); i += 4 {
+			pixels.Pix[i] = 255
+		}
+		payload, encodeErr := enc.Encode(pixels, 70)
+		if encodeErr == nil && len(payload) == 0 {
+			encodeErr = ErrVideoUnavailable
+		}
+		if encodeErr == nil {
+			switch codec {
+			case CodecHardwareH264:
+				_, encodeErr = unpackH264(payload)
+			case CodecHardwareHEVC:
+				_, encodeErr = unpackHEVC(payload)
+			case CodecHardwareAV1, CodecSoftwareAV1:
+				_, encodeErr = IsKeyframe(WireAV1, payload)
+			}
+		}
+		if encodeErr == nil {
+			if reporter, ok := enc.(BackendReporter); ok {
+				slog.Info("影片編碼能力探測通過", "codec", codec, "width", size.X, "height", size.Y, "backend", reporter.Backend())
+			}
+		}
+		enc.Close()
+		if encodeErr == nil {
+			return true, nil
+		}
+		failures = append(failures, fmt.Errorf("%d×%d：%w", size.X, size.Y, encodeErr))
+	}
+	return false, errors.Join(failures...)
 }
 func WireForCodec(codec Codec) WireCodec {
 	if codec == CodecHardwareAV1 || codec == CodecSoftwareAV1 {

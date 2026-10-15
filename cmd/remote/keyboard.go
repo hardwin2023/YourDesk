@@ -9,8 +9,7 @@ import (
 
 func (g *game) releaseRawKeys(reason string) {
 	if g.peer != nil {
-		g.clipboard.CancelKeys(reason)
-		_ = g.peer.SendControl(p2p.Control{Type: "raw-key-reset"})
+		g.clipboard.ResetKeys(reason)
 	}
 	clear(g.rawHeld)
 }

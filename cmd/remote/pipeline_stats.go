@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+	"yourdesk/internal/authlog"
 	"yourdesk/internal/diagnostics"
 	"yourdesk/internal/p2p"
 )
@@ -14,16 +15,19 @@ import (
 // 收到的單位在 JPEG 模式可能是區塊，不能一律解讀為來源 FPS。
 type viewerPipelineStats struct {
 	wire                                                            atomic.Uint32
+	decodeMode                                                      atomic.Uint32
 	received, decoded, failed, waiting, gaps, decodeNanos, attempts atomic.Uint64
+	codecNanos, codecCalls, queueDrops, overloads                   atomic.Uint64
 }
 type pipelineSample struct {
 	at                                                                             time.Time
 	bytes                                                                          uint64
 	received, decoded, failed, waiting, gaps, nanos, attempts, presented, rendered uint64
+	codecNanos, codecCalls, queueDrops, overloads                                  uint64
 }
 
 func newPipelineSample(s *viewerPipelineStats, g *game) pipelineSample {
-	return pipelineSample{time.Now(), 0, s.received.Load(), s.decoded.Load(), s.failed.Load(), s.waiting.Load(), s.gaps.Load(), s.decodeNanos.Load(), s.attempts.Load(), g.presentedFrames.Load(), g.renderedFrames.Load()}
+	return pipelineSample{at: time.Now(), received: s.received.Load(), decoded: s.decoded.Load(), failed: s.failed.Load(), waiting: s.waiting.Load(), gaps: s.gaps.Load(), nanos: s.decodeNanos.Load(), attempts: s.attempts.Load(), presented: g.presentedFrames.Load(), rendered: g.renderedFrames.Load(), codecNanos: s.codecNanos.Load(), codecCalls: s.codecCalls.Load(), queueDrops: s.queueDrops.Load(), overloads: s.overloads.Load()}
 }
 func (p *pipelineSample) report(s *viewerPipelineStats, g *game, peer *p2p.Peer) {
 	if time.Since(p.at) < 5*time.Second {
@@ -39,12 +43,19 @@ func (p *pipelineSample) report(s *viewerPipelineStats, g *game, peer *p2p.Peer)
 		gop = r.Effective.KeyframeInterval
 		accepted = r.Accepted
 	}
-	codec := map[uint32]string{0: "JPEG（可能為區塊）", 1: "H.264", 2: "HEVC"}[s.wire.Load()]
+	codec := map[uint32]string{0: "JPEG（可能為區塊）", 1: "H.264", 2: "HEVC", 3: "AV1"}[s.wire.Load()]
 	averageMS := 0.0
 	if count := next.attempts - p.attempts; count > 0 {
 		averageMS = float64(next.nanos-p.nanos) / float64(count) / 1e6
 	}
-	slog.Info("遠端顯示 管線統計", "codec", codec, "remoteConfigAccepted", accepted, "remoteFPSLimit", limit, "remoteGOP", gop, "receivedUnitsPerSec", float64(next.received-p.received)/elapsed, "decodedUnitsPerSec", float64(next.decoded-p.decoded)/elapsed, "sourcePresentedFPS", float64(next.presented-p.presented)/elapsed, "renderFPS", float64(next.rendered-p.rendered)/elapsed, "callbackAverageMs", averageMS, "sequenceGaps", next.gaps-p.gaps, "waitingForIDR", next.waiting-p.waiting, "decodeErrors", next.failed-p.failed)
+	decodeMS := 0.0
+	if count := next.codecCalls - p.codecCalls; count > 0 {
+		decodeMS = float64(next.codecNanos-p.codecNanos) / float64(count) / 1e6
+	}
+	slog.Info("遠端顯示 管線統計", "codec", codec, "remoteConfigAccepted", accepted, "remoteFPSLimit", limit, "remoteGOP", gop, "receivedUnitsPerSec", float64(next.received-p.received)/elapsed, "decodedUnitsPerSec", float64(next.decoded-p.decoded)/elapsed, "sourcePresentedFPS", float64(next.presented-p.presented)/elapsed, "renderFPS", float64(next.rendered-p.rendered)/elapsed, "callbackAverageMs", averageMS, "decodeAverageMs", decodeMS, "queueDrops", next.queueDrops-p.queueDrops, "codecOverloads", next.overloads-p.overloads, "sequenceGaps", next.gaps-p.gaps, "waitingForIDR", next.waiting-p.waiting, "decodeErrors", next.failed-p.failed)
+	if authlog.IsEnabled() {
+		authlog.Event("viewer-pipeline", map[string]any{"codec": codec, "decodeMode": map[uint32]string{0: "unknown", 1: "software", 2: "hardware"}[s.decodeMode.Load()], "decodeAverageMs": decodeMS, "queueDrops": next.queueDrops - p.queueDrops, "codecOverloads": next.overloads - p.overloads, "receivedPerSec": float64(next.received-p.received) / elapsed, "decodedPerSec": float64(next.decoded-p.decoded) / elapsed, "renderFPS": float64(next.rendered-p.rendered) / elapsed, "waitingForIDR": next.waiting - p.waiting, "decodeErrors": next.failed - p.failed})
+	}
 	if g.uiEvents {
 		rate := 0.0
 		if p.bytes > 0 && next.bytes >= p.bytes {

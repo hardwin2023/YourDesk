@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
+	"yourdesk/internal/eventqueue"
 	"yourdesk/internal/peertransport"
 	"yourdesk/internal/rawkey"
 	"yourdesk/internal/signaling"
@@ -93,7 +94,7 @@ type Peer struct {
 	transportSamples    transportSampler
 	clipboardFlow       clipboardFlowState
 	controlDispatchOnce sync.Once
-	controlInbox        chan Control
+	controlInbox        *eventqueue.Queue[Control]
 	controlOverflowOnce sync.Once
 	clipboardSendOnce   sync.Once
 	clipboardSendGate   [2]chan struct{}

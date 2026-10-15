@@ -23,6 +23,14 @@ func TestPreloginIndependentAuthorization(t *testing.T) {
 		{"SAS關閉須使用專用開關", runtime, preloginChange{SecureAttention: true}, false, true},
 		{"其他平台不能安裝", prelogin.State{Supported: true}, preloginChange{Enabled: true, DesktopAccess: true}, false, true},
 		{"WinPE不能安裝", prelogin.State{}, preloginChange{Enabled: true, DesktopAccess: true}, false, true},
+		{"故障開機服務可獨立移除", prelogin.State{Supported: true, DesktopAccessSupported: true, Installed: true, Enabled: true, Error: "服務故障"}, preloginChange{Remove: true}, true, false},
+		{"模式標記損壞仍可移除", prelogin.State{Supported: true, DesktopAccessSupported: true, Installed: true, Error: "模式損壞"}, preloginChange{Remove: true}, true, false},
+		{"目錄殘留可移除", runtime, preloginChange{Remove: true}, true, false},
+		{"無服務不重複移除", prelogin.State{Supported: true, DesktopAccessSupported: true}, preloginChange{Remove: true}, false, false},
+		{"其他平台不能移除", prelogin.State{Supported: true, Enabled: true}, preloginChange{Remove: true}, false, true},
+		{"不可同時開啟與移除", runtime, preloginChange{Enabled: true, Remove: true}, false, true},
+		{"不可同時授權SAS與移除", runtime, preloginChange{SecureAttention: true, Remove: true}, false, true},
+		{"不可同時切換授權與移除", runtime, preloginChange{DesktopAccess: true, Remove: true}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			needed, err := preloginChangeNeeded(tc.state, tc.request)

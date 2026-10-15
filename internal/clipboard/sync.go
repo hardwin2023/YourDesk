@@ -9,12 +9,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"yourdesk/internal/eventqueue"
 	"yourdesk/internal/p2p"
 )
 
 type keyJob struct {
 	generation uint64
 	paste      bool
+	reset      bool
 	control    p2p.Control
 }
 type Sync struct {
@@ -33,6 +35,7 @@ type Sync struct {
 	clipCtx           context.Context
 	generation        uint64
 	pasteCancel       context.CancelCauseFunc
+	inputInFlight     bool
 	held              map[string]p2p.Control
 	remote            atomic.Bool
 	legacyRemote      atomic.Bool
@@ -43,12 +46,18 @@ type Sync struct {
 	packets           chan []byte
 	sent              int64
 	sentValid         bool
-	keys              chan keyJob
+	keys              *eventqueue.Queue[keyJob]
 	acks              map[string]chan error
 }
 
 func New() *Sync {
-	return &Sync{pull: newPullState(), packets: make(chan []byte, 256), observed: nativeRevision(), progress: make(map[string]*transferProgress), transferGate: make(chan struct{}, 1), keys: make(chan keyJob, 4096), acks: make(map[string]chan error), held: make(map[string]p2p.Control)}
+	return &Sync{pull: newPullState(), packets: make(chan []byte, 256), observed: nativeRevision(), progress: make(map[string]*transferProgress), transferGate: make(chan struct{}, 1), keys: newInputQueue(), acks: make(map[string]chan error), held: make(map[string]p2p.Control)}
+}
+
+func newInputQueue() *eventqueue.Queue[keyJob] {
+	return eventqueue.New(4096, func(previous, next keyJob) bool {
+		return !previous.paste && !next.paste && !previous.reset && !next.reset && previous.generation == next.generation && p2p.CanCoalesceMoves(previous.control, next.control)
+	})
 }
 
 // Run 僅在工作階段驗證完成後啟動；剪貼簿通道失敗不關閉操作通道。
@@ -135,9 +144,7 @@ func (s *Sync) Poll(force bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	select {
-	case s.keys <- keyJob{paste: true, generation: s.generation}:
-	default:
+	if !s.keys.Push(keyJob{paste: true, generation: s.generation}, 0) {
 		slog.Warn("剪貼簿貼上佇列已滿")
 	}
 }
@@ -150,7 +157,20 @@ func (s *Sync) CancelKeys(reasons ...string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.held) == 0 && len(s.keys) == 0 && s.pasteCancel == nil {
+	s.resetKeysLocked(reason, false)
+}
+
+// ResetKeys 明確要求遠端重設，即使目前沒有本機持鍵狀態也送出屏障。
+func (s *Sync) ResetKeys(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetKeysLocked(reason, true)
+}
+
+// 只排入有序屏障，不在 UI 執行緒等待傳輸。傳送中的按下事件返回後，
+// 工作者仍記錄它，再由屏障釋放，避免失焦恰逢傳送時留下卡鍵。
+func (s *Sync) resetKeysLocked(reason string, force bool) {
+	if !force && len(s.held) == 0 && s.keys.Len() == 0 && s.pasteCancel == nil && !s.inputInFlight {
 		return
 	}
 	s.generation++
@@ -158,129 +178,144 @@ func (s *Sync) CancelKeys(reasons ...string) {
 		s.pasteCancel(errors.New(reason))
 		s.pasteCancel = nil
 	}
-	if s.peer == nil {
-		return
-	}
-	for _, c := range s.held {
-		if c.RawKey != nil {
-			copy := *c.RawKey
-			copy.Down = false
-			copy.Repeat = false
-			copy.Modifiers = 0
-			c.RawKey = &copy
-		} else {
-			c.Down = false
-		}
-		_ = s.peer.SendControl(c)
-	}
-	clear(s.held)
-	_ = s.peer.SendControl(p2p.Control{Type: "raw-key-reset"})
+	s.keys.Reset(keyJob{generation: s.generation, reset: true})
 }
 func (s *Sync) SendControl(c p2p.Control) error {
-	if c.Type == "raw-key-reset" {
-		s.CancelKeys("原始鍵盤狀態重設")
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.peer != nil {
-			return s.peer.SendControl(c)
-		}
-		return nil
-	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.peer == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("操作連線尚未就緒")
 	}
-	if c.Type != "key" && c.Type != "raw-key" && c.Type != "button" && c.Type != "move" && c.Type != "wheel" {
-		return s.peer.SendControl(c)
+	if c.Type != "key" && c.Type != "raw-key" && c.Type != "button" && c.Type != "move" && c.Type != "wheel" && c.Type != "raw-key-reset" {
+		peer := s.peer
+		s.mu.Unlock()
+		return peer.SendControl(c)
 	}
+	defer s.mu.Unlock()
 	if s.ctx.Err() != nil {
 		return s.ctx.Err()
 	}
-	// 滑鼠與鍵盤共用順序；滿載時略過過時的移動，保留可靠事件空間。
-	if c.Type == "move" && len(s.keys) >= 64 {
+	if c.Type == "raw-key-reset" {
+		s.resetKeysLocked("原始鍵盤狀態重設", true)
 		return nil
 	}
-	select {
-	case s.keys <- keyJob{control: c, generation: s.generation}:
-		return nil
-	default:
+	// 滑鼠與鍵盤共用順序；只更新尾端連續移動，保留可靠事件空間。
+	limit := 0
+	if c.Type == "move" {
+		limit = 64
+	}
+	if !s.keys.Push(keyJob{control: c, generation: s.generation}, limit) && c.Type != "move" {
 		return fmt.Errorf("輸入佇列已滿")
 	}
+	return nil
 }
 func (s *Sync) keyboard(ctx context.Context) {
+	s.keyboardWithSender(ctx, s.peer.SendControl)
+}
+
+func (s *Sync) keyboardWithSender(ctx context.Context, send func(p2p.Control) error) {
 	dropPaste := false
 	var generation uint64
 	for {
-		select {
-		case <-ctx.Done():
+		job, ok := s.keys.Pop(ctx.Done())
+		if !ok {
 			return
-		case job := <-s.keys:
-			s.mu.Lock()
-			if job.generation != s.generation {
-				s.mu.Unlock()
-				continue
-			}
-			if generation != job.generation {
-				dropPaste = false
-				generation = job.generation
-			}
-			if job.paste {
-
-				timeoutCtx, timeoutCancel := context.WithTimeout(ctx, TransferTimeout)
-				pasteCtx, cancel := context.WithCancelCause(timeoutCtx)
-				s.pasteCancel = cancel
-				s.mu.Unlock()
-				err := s.waitPasteTransfer(pasteCtx)
-				cause := context.Cause(pasteCtx)
-				cancel(nil)
-				timeoutCancel()
-				dropPaste = err != nil
-				s.mu.Lock()
-				if job.generation == s.generation {
-					s.pasteCancel = nil
-				}
-				s.mu.Unlock()
-				if err != nil && ctx.Err() == nil {
-					if errors.Is(err, context.Canceled) {
-						slog.Info("貼上按鍵已取消，背景資料傳輸不受影響", "原因", cause)
-					} else {
-						slog.Warn("貼上未執行，剪貼簿尚未就緒", "error", err)
-					}
-				}
-				continue
-			}
-			c := job.control
-			down := c.Down
-			if c.RawKey != nil {
-				down = c.RawKey.Down
-			}
-			if dropPaste && isPasteKey(c) {
-				if !down {
-					dropPaste = false
-				}
-				s.mu.Unlock()
-				continue
-			}
-			if err := s.peer.SendControl(c); err == nil {
-				id := c.Key
+		}
+		s.mu.Lock()
+		if job.generation != s.generation {
+			s.mu.Unlock()
+			continue
+		}
+		if generation != job.generation {
+			dropPaste = false
+			generation = job.generation
+		}
+		if job.reset {
+			releases := make([]p2p.Control, 0, len(s.held)+1)
+			for _, c := range s.held {
 				if c.RawKey != nil {
-					id = fmt.Sprintf("%s/%d", c.RawKey.Platform, c.RawKey.Code)
+					copy := *c.RawKey
+					copy.Down, copy.Repeat, copy.Modifiers = false, false, 0
+					c.RawKey = &copy
+				} else {
+					c.Down = false
 				}
-				if c.Type == "button" {
-					id = fmt.Sprintf("mouse/%d", c.Button)
-				}
-				if c.Type == "key" || c.Type == "raw-key" || c.Type == "button" {
-					if down {
-						s.held[id] = c
-					} else {
-						delete(s.held, id)
-					}
-				}
-			} else if ctx.Err() == nil {
-				slog.Debug("鍵盤傳送失敗", "error", err)
+				releases = append(releases, c)
+			}
+			clear(s.held)
+			s.inputInFlight = true
+			s.mu.Unlock()
+			for _, c := range append(releases, p2p.Control{Type: "raw-key-reset"}) {
+				_ = send(c)
+			}
+			s.mu.Lock()
+			s.inputInFlight = false
+			s.mu.Unlock()
+			continue
+		}
+		if job.paste {
+
+			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, TransferTimeout)
+			pasteCtx, cancel := context.WithCancelCause(timeoutCtx)
+			s.pasteCancel = cancel
+			s.mu.Unlock()
+			err := s.waitPasteTransfer(pasteCtx)
+			cause := context.Cause(pasteCtx)
+			cancel(nil)
+			timeoutCancel()
+			dropPaste = err != nil
+			s.mu.Lock()
+			if job.generation == s.generation {
+				s.pasteCancel = nil
 			}
 			s.mu.Unlock()
+			if err != nil && ctx.Err() == nil {
+				if errors.Is(err, context.Canceled) {
+					slog.Info("貼上按鍵已取消，背景資料傳輸不受影響", "原因", cause)
+				} else {
+					slog.Warn("貼上未執行，剪貼簿尚未就緒", "error", err)
+				}
+			}
+			continue
 		}
+		c := job.control
+		down := c.Down
+		if c.RawKey != nil {
+			down = c.RawKey.Down
+		}
+		if dropPaste && isPasteKey(c) {
+			if !down {
+				dropPaste = false
+			}
+			s.mu.Unlock()
+			continue
+		}
+		s.inputInFlight = true
+		s.mu.Unlock()
+		err := send(c)
+		s.mu.Lock()
+		s.inputInFlight = false
+		if err == nil {
+			id := c.Key
+			if c.RawKey != nil {
+				id = fmt.Sprintf("%s/%d", c.RawKey.Platform, c.RawKey.Code)
+			}
+			if c.Type == "button" {
+				id = fmt.Sprintf("mouse/%d", c.Button)
+			}
+			if c.Type == "key" || c.Type == "raw-key" || c.Type == "button" {
+				if down {
+					if s.held == nil {
+						s.held = make(map[string]p2p.Control)
+					}
+					s.held[id] = c
+				} else {
+					delete(s.held, id)
+				}
+			}
+		} else if ctx.Err() == nil {
+			slog.Debug("鍵盤傳送失敗", "error", err)
+		}
+		s.mu.Unlock()
 	}
 }

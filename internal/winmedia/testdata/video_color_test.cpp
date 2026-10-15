@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <initializer_list>
+#include <vector>
 using HRESULT=std::int32_t;
 using UINT32=std::uint32_t;
 constexpr HRESULT S_OK=0,E_INVALIDARG=-1,E_NOTIMPL=-2,MF_E_ATTRIBUTENOTFOUND=-3;
@@ -27,6 +28,7 @@ struct IMFMediaType {
  }
 };
 #include "../video_color.h"
+#include "../encoder_controls.h"
 static void near(const unsigned char *p,int r,int g,int b){
  assert(std::abs((int)p[0]-r)<=2 && std::abs((int)p[1]-g)<=2 && std::abs((int)p[2]-b)<=2 && p[3]==255);
 }
@@ -59,5 +61,33 @@ int main(){
  type.matrix=1;type.range=3;assert(yd_media_yuv_color(&type,&color)==E_NOTIMPL);
  type.error=E_INVALIDARG;assert(yd_media_yuv_color(&type,&color)==E_INVALIDARG);
  assert(yd_media_yuv_color(nullptr,&color)==E_INVALIDARG);
+ // RGBA→BGRA 不改 alpha／列間距，也不能將紅藍色反轉到輸出畫面。
+ const unsigned char rgba[]={255,0,0,255,0,255,0,127,42,42,42,42,0,0,255,200,255,255,255,255};
+ unsigned char bgra[20]{};
+ yd_rgba_to_bgra(rgba,12,bgra,12,2,2);
+ assert(bgra[0]==0&&bgra[1]==0&&bgra[2]==255&&bgra[3]==255);
+ assert(bgra[4]==0&&bgra[5]==255&&bgra[6]==0&&bgra[7]==127);
+ assert(bgra[8]==0&&bgra[11]==0&&bgra[12]==255&&bgra[14]==0&&bgra[15]==200);
+ assert(bgra[16]==255&&bgra[19]==255);
+ assert(yd_encoder_bitrate(5000000,1920,1080,60,70)==5000000);
+ assert(yd_encoder_bitrate(0,128,128,30,70)==1000000);
+ assert(yd_encoder_bitrate(0,1920,1080,30,70)==5598720);
+ assert(yd_encoder_bitrate(0,8192,8192,240,100)>=1000000);
+ std::vector<yd_encoder_control> attempts;
+ auto choose=[&](yd_encoder_control accepted){
+  return [&,accepted](yd_encoder_control mode)->HRESULT{attempts.push_back(mode);return mode==accepted?S_OK:E_INVALIDARG;};
+ };
+ assert(yd_try_encoder_controls(0,choose(yd_encoder_control::quality))==S_OK&&attempts.size()==1);
+ attempts.clear();
+ assert(yd_try_encoder_controls(0,choose(yd_encoder_control::cbr))==S_OK&&attempts.size()==2);
+ assert(attempts[0]==yd_encoder_control::quality&&attempts[1]==yd_encoder_control::cbr);
+ attempts.clear();
+ assert(yd_try_encoder_controls(0,choose(yd_encoder_control::media_type))==S_OK&&attempts.size()==3);
+ attempts.clear();
+ assert(yd_try_encoder_controls(5000000,choose(yd_encoder_control::cbr))==S_OK&&attempts.size()==1);
+ assert(attempts[0]==yd_encoder_control::cbr);
+ attempts.clear();
+ assert(yd_try_encoder_controls(5000000,choose(yd_encoder_control::media_type))==S_OK&&attempts.size()==2);
+ assert(yd_try_encoder_controls(0,[](yd_encoder_control)->HRESULT{return E_INVALIDARG;})==E_INVALIDARG);
  std::puts("video color metadata and pixel tests passed");
 }

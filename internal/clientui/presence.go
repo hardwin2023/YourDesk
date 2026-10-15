@@ -1,23 +1,56 @@
 package clientui
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+	"yourdesk/internal/prelogin"
 	"yourdesk/internal/security"
 	"yourdesk/internal/signaling"
 )
+
+type presence struct {
+	Online       *bool                       `json:"online"`
+	Capabilities *signaling.HostCapabilities `json:"capabilities,omitempty"`
+}
+
+// 安裝模式不代表 Host 已註冊；本機與站台使用同一個配對伺服器在線查詢。
+func (s *server) serveLocalPresence(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	service := s.preloginState()
+	target := localPresenceTarget(s.info["room"], s.options.Signal, service)
+	s.mu.Unlock()
+	result := struct {
+		Room string `json:"room"`
+		presence
+	}{Room: target.Room}
+	if target.Room != "" {
+		result.presence = queryPresence(r.Context(), []Site{target})[target.ID]
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	respond(w, 200, result)
+}
+
+func localPresenceTarget(room, signal string, service prelogin.State) Site {
+	if service.Managed() {
+		room = service.Room // 缺少服務 ID 時不能拿普通使用者 ID 假裝服務可用。
+	}
+	return Site{ID: "host", Room: room, Signal: signal}
+}
 
 func (s *server) servePresence(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	sites := append([]Site(nil), s.library.Sites...)
 	s.mu.Unlock()
-	type presence struct {
-		Online       *bool                       `json:"online"`
-		Capabilities *signaling.HostCapabilities `json:"capabilities,omitempty"`
-	}
+	states := queryPresence(r.Context(), sites)
+	w.Header().Set("Cache-Control", "no-store")
+	respond(w, 200, states)
+}
+
+func queryPresence(ctx context.Context, sites []Site) map[string]presence {
 	states := make(map[string]presence, len(sites))
 	groups := make(map[string][]Site)
 	for _, site := range sites {
@@ -32,8 +65,7 @@ func (s *server) servePresence(w http.ResponseWriter, r *http.Request) {
 	slots := make(chan struct{}, 4)
 	client, err := security.TLSHTTPClient(3 * time.Second)
 	if err != nil {
-		respond(w, 200, states)
-		return
+		return states
 	}
 	// 本次查詢使用獨立連線池，所有工作結束後釋放閒置連線。
 	defer client.CloseIdleConnections()
@@ -43,7 +75,7 @@ func (s *server) servePresence(w http.ResponseWriter, r *http.Request) {
 			defer pending.Done()
 			select {
 			case slots <- struct{}{}:
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			}
 			defer func() { <-slots }()
@@ -54,11 +86,11 @@ func (s *server) servePresence(w http.ResponseWriter, r *http.Request) {
 					rooms = append(rooms, site.Room)
 				}
 				body, _ := json.Marshal(map[string]any{"rooms": rooms, "details": true})
-				response, err := security.SignalHTTPRequest(r.Context(), client, signal, "POST", "/presence", body)
+				response, err := security.SignalHTTPRequest(ctx, client, signal, "POST", "/presence", body)
 				if err != nil {
 					// 舊 Server 可能拒絕 details；共用 HTTP 層已關閉失敗回應。
 					body, _ = json.Marshal(map[string]any{"rooms": rooms})
-					response, err = security.SignalHTTPRequest(r.Context(), client, signal, "POST", "/presence", body)
+					response, err = security.SignalHTTPRequest(ctx, client, signal, "POST", "/presence", body)
 					if err != nil {
 						return
 					}
@@ -93,6 +125,5 @@ func (s *server) servePresence(w http.ResponseWriter, r *http.Request) {
 		}(signal, group)
 	}
 	pending.Wait()
-	w.Header().Set("Cache-Control", "no-store")
-	respond(w, 200, states)
+	return states
 }

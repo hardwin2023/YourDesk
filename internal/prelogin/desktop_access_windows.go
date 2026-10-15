@@ -17,6 +17,8 @@ const desktopControlMarker = "desktop-control.v1"
 const desktopAutostartDisabled = "autostart.disabled"
 const desktopMarkerACL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;AU)"
 
+var desktopRuntimeControl desktopRuntime
+
 func readDesktopMarker(root, name string) ([]byte, error) {
 	path := filepath.Join(root, name)
 	if err := noReparsePath(path); err != nil {
@@ -83,6 +85,15 @@ func markDesktopControl(root string) error {
 
 func installDesktopAccess(path string) error { return installService(path, false) }
 
+func RemoveService(ctx context.Context) error {
+	state := Status()
+	if !state.DesktopAccessSupported {
+		return errors.New("此平台不支援系統操作授權。")
+	}
+	// 呼叫端由使用者明確確認移除；即使開機設定或管線損壞也可交由 UAC 清除。
+	return elevateWindows(ctx, "remove", "")
+}
+
 func ConfigureDesktopAccess(ctx context.Context, enabled bool, c Config) error {
 	state := Status()
 	if !state.DesktopAccessSupported {
@@ -121,9 +132,10 @@ func dialDesktopControl(ctx context.Context) (net.Conn, error) {
 func HoldDesktopAccess(ctx context.Context, ready func()) error {
 	conn, err := dialDesktopControl(ctx)
 	if err != nil {
+		desktopRuntimeControl.protocol.Store(0)
 		return err
 	}
-	return holdDesktopLease(ctx, conn, ready)
+	return desktopRuntimeControl.hold(ctx, conn, ready)
 }
 
 func requestDesktopAutostart(ctx context.Context, enabled bool) error {

@@ -1,6 +1,14 @@
 #ifndef YOURDESK_VIDEO_COLOR_H
 #define YOURDESK_VIDEO_COLOR_H
 
+// 部分 Video Processor 只接受 BGRA；換通道仍交由同一 GPU 轉 NV12 與硬體 MFT 編碼。
+static void yd_rgba_to_bgra(const unsigned char *src,int stride,unsigned char *dst,int outputStride,int w,int h) {
+ for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+  const auto *in=src+y*stride+x*4;auto *out=dst+y*outputStride+x*4;
+  out[0]=in[2];out[1]=in[1];out[2]=in[0];out[3]=in[3];
+ }
+}
+
 // MF 的 range 列舉數值與 D3D11 相反，必須逐項對應，不能直接轉型。
 // 未宣告矩陣依 MF 規格使用 BT.709；未宣告 NV12 range 使用 studio range。
 static HRESULT yd_media_yuv_color(IMFMediaType *type,D3D11_VIDEO_PROCESSOR_COLOR_SPACE *out) {

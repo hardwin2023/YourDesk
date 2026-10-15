@@ -4,6 +4,14 @@ AV1 更新：已補上 Windows／macOS 軟體編碼、macOS VideoToolbox 硬解�
 
 APP 取得單一執行個體鎖後，啟動獨立背景協調工作；不等待偵測完成才開啟視窗。偵測結果可提供新連線的能力篩選與差分記憶體策略，不改寫使用者偏好，不切換現有連線的編解碼器。
 
+## 串流執行期間的過載保護（2026-10-15）
+
+背景能力探測成功只表示可完成該測試，不保證實際解析度與 FPS 下的持續吞吐。硬體編碼搭配軟體解碼仍可使用；接收端現在以實際解碼耗時和雙槽佇列滿載丟幀判斷是否過載，並只在當次連線撤回持續過慢的影片格式。這與背景能力結果分開，不改寫設定或永久標成硬體不支援。
+
+略過各影片格式首張初始化；連續三次解碼至少 120 ms 且都有新增滿載丟幀才撤回，健康影格或無新丟幀會重新計數。Host 依既有能力協商選其他編碼，最後保留 JPEG。Media Foundation／D3D 與 FFmpeg 解碼的原生工作者另有建立／操作 5 秒、銷毀 1 秒的呼叫端等待期限；逾時工作者退役，原資源仍由其擁有者回收，不強制終止驅動或釋放仍在使用的記憶體。
+
+實際 FFmpeg 解碼、GOP、過載／逾時與輸入順序 Smoke 已通過；不代表已完成 Windows 驅動停滯或長時間連線實測。詳見 [卡頓回報、修正與驗證界線](WINDOWS-IDLE-INPUT.md#漸進卡頓與控制端無法關閉2026-10-15)。
+
 ## 執行與生命週期
 
 - `internal/hardwareprobe` 每個 APP 程序只啟動一次，最多 4 個偵測子程序同時運作。
@@ -103,6 +111,26 @@ D3D 裝置可用僅代表圖形 API 能力；D3D12 尚未作為影片編解碼�
 Windows 正式接收路徑先使用 Media Foundation／D3D11 硬解，H.264／HEVC 轉為 Annex B，AV1 使用附長度的 low-overhead OBU。硬解建立或取回影格失敗才切換 FFmpeg CPU 工作階段；GOP 中途切換先要求 key frame，避免缺少參考影格。Windows 使用 FFmpeg 8.1.1 的 H.264／HEVC decoder，以及 libaom 3.13.1 AV1 decoder，不依賴 Windows HEVC／AV1 codec extension。macOS AV1 硬解採 VideoToolbox，軟體編解碼採 libaom，兩方向分開測試。
 
 Windows AV1 已接入原生 MFT 編碼、OBU 封包、能力公告及協商。只在實際編碼成功後提供 AV1 硬體選項；同硬解等級內保留 HEVC、H.264、AV1 順序，避免只因新格式就改變既有預設。指定 AV1 時仍要求接收端公告支援，舊版不會收到 AV1。
+
+### Windows 原生實測成功、正式串流不可用的修正（2026-10-14）
+
+使用者提供的 Intel HD Graphics 530 截圖顯示：原生 HEVC／BGRA、NV12 編碼已實際產出硬體影格，正式 RGBA 與選單卻不支援。程式檢查確認，Windows 正式編碼器與原生入口先前只接受 H.264、AV1，未接通 HEVC；原生分析的成功不會自動補上這條路徑。截圖中的 H.264 原生結果為軟體運算，不能據此宣告 H.264 硬體可用。
+
+已補齊下列共用處理，不依 GPU 型號做特例：
+
+- Windows 正式 RGBA 編碼接入 HEVC 硬體 MFT，將 Annex B／長度前綴輸出及序列標頭轉為既有跨平台封包。GOP 參考影格沿用已驗證的 VPS／SPS／PPS，編碼器重設時清除舊參數。
+- 不再以 128×128 單一尺寸決定整體編碼能力；128×128、1920×1080 任一正式路徑成功即可提供選項。Host 仍按實際串流尺寸檢查失敗證據，未測尺寸仍需真正編碼，不能用另一個尺寸的成功保證可用。
+- 品質控制、CBR 控制或指定 H.264 profile 遭驅動拒絕時，重新建立同一硬體 MFT，依序嘗試可用控制模式與媒體型別預設。品質模式亦提供合理的 nominal bitrate，不再設定為 1 bps；後端資訊記錄實際採用模式。硬體候選失敗不會偷偷改用軟體並標成硬體。
+- D3D11 Video Processor 不接受 RGBA 輸入時，先轉為其支援的 BGRA，再由原有 GPU 路徑轉為 NV12。保留列間距與 alpha，避免紅藍通道互換。
+- 若驅動可設定 GOP 間隔但不支援逐張要求關鍵影格，沿用 GOP 控制，不再每張重複呼叫已確認不支援的強制關鍵影格屬性。正式 RGBA 探測也保留失敗原因，方便區分驅動／型別協商與封包問題。
+
+原生 BGRA／NV12 矩陣仍屬診斷資料；選單與連線策略必須取得正式 RGBA 編碼成功證據。這可避免原生測試成功、實際輸入轉換或封包卻失敗時錯誤宣告可用。
+
+驗證包含真實 HEVC 固定影格的封包往返、GOP 參數沿用與損毀資料拒收、尺寸證據分離、控制模式備援及 RGBA／BGRA 色彩轉換 Smoke；另交叉編譯 Windows x64／ARM64 正式影音組態的 Client、遠端顯示與測試執行檔。尚未在這台 HD Graphics 530 實機執行，不能把編譯成功當成驅動驗收。
+
+Windows 實機可執行 `TestWindowsHardwareEncoderSmoke`，涵蓋 1080p、品質模式、8 Mbps 與 GOP 10。設定 `YOURDESK_REQUIRE_HW_ENCODER=hevc` 可將沒有 HEVC 硬體路徑視為失敗，避免測試因無硬體而跳過。
+
+依據：[Media Foundation 的序列標頭](https://learn.microsoft.com/en-us/windows/win32/medfound/mf-mt-mpeg-sequence-header-attribute)、[編碼率控制模式](https://learn.microsoft.com/en-us/windows/win32/codecapi/avenccommonratecontrolmode-property)。
 
 ## 獨立軟體測試
 

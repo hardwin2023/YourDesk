@@ -52,6 +52,7 @@
             <div class="preference-row experimental-unavailable" tabindex="0" data-tooltip="登入系統前也能接受遠端連線；目前不支援。"><label for="ui-prelogin"><span>登入前啟動</span> <span class="experimental-badge">實驗性功能</span></label><input id="ui-prelogin" class="preference-switch" type="checkbox" role="switch" disabled aria-describedby="prelogin-access-reason"><span id="prelogin-access-reason" class="help-description">登入系統前也能接受遠端連線；目前不支援。</span></div>
             <div id="desktop-access-row" class="preference-row" hidden data-tooltip="首次授權需管理員允許；登入前啟動關閉時，只在 APP 執行期間接受遠端連線。"><label for="ui-desktop-access">授權系統操作</label><input id="ui-desktop-access" class="preference-switch" type="checkbox" role="switch"></div>
             <div id="sas-permission-row" class="preference-row" hidden data-tooltip="關閉只停用 YourDesk 傳送 Ctrl+Alt+Del，不會關閉登入前服務。"><label for="authorize-sas">授權 Ctrl+Alt+Del</label><input id="authorize-sas" class="preference-switch" type="checkbox" role="switch"></div>
+            <div id="remove-service-row" class="preference-row" hidden data-tooltip="移除登入前啟動與系統操作服務；服務故障時也可使用。需要管理員授權。"><label for="remove-system-service">系統服務</label><button id="remove-system-service" class="button" type="button">移除系統服務</button></div>
             <p id="prelogin-progress" class="form-note" role="status" aria-live="polite"></p>
             <div class="preference-row"><label for="ui-hints">顯示使用提示</label><input id="ui-hints" class="preference-switch" type="checkbox" role="switch" checked></div>
             <div class="preference-row"><label for="ui-key-mapping">MacOS/Windows 按鍵映射</label><input id="ui-key-mapping" class="preference-switch" type="checkbox" role="switch" checked></div>
@@ -116,7 +117,7 @@
           </section>
           <section id="settings-panel-about" role="tabpanel" aria-labelledby="settings-tab-about" tabindex="0" hidden>
 
-            <h3 class="settings-panel-title">關於</h3><div class="settings-about-heading"><div class="settings-about-brand" data-tooltip="P2P 遠端桌面" tabindex="0"><img src="app-icon.png" alt="" width="40" height="40">YourDesk</div><div class="settings-update-actions"><button id="install-prerelease" class="button" type="button" hidden>安裝測試版本</button><button id="check-update" class="button" type="button">檢查更新</button></div></div>
+            <h3 class="settings-panel-title">關於</h3><div class="settings-about-heading"><div class="settings-about-brand" data-tooltip="P2P 遠端桌面" tabindex="0"><img src="app-icon.png" alt="" width="40" height="40">YourDesk</div><div class="settings-update-actions"><button id="install-prerelease" class="button" type="button" hidden>安裝測試版本</button><button id="check-update" class="button" type="button">檢查更新</button><button id="local-update" class="button" type="button" hidden>本地更新</button><input id="local-update-file" type="file" accept=".dmg,.zip" hidden></div></div>
             <dl class="settings-details"><div><dt>版本</dt><dd id="settings-version">—</dd></div><div><dt>系統 / 架構</dt><dd id="settings-platform">—</dd></div><div><dt>GitHub</dt><dd><a id="project-github" href="https://github.com/VaderChen/YourDesk" target="_blank" rel="noopener noreferrer" data-no-i18n>https://github.com/VaderChen/YourDesk ↗</a></dd></div><div><dt>支持開發</dt><dd><a href="https://buymeacoffee.com/vaderchen" target="_blank" rel="noopener noreferrer" data-no-i18n>https://buymeacoffee.com/vaderchen ↗</a></dd></div></dl><div class="preference-row" data-tooltip="即使版本相同或較新，也可下載最新發布的版本。"><label for="force-update">強制更新</label><input id="force-update" class="preference-switch" type="checkbox" role="switch"></div><div class="preference-row"><label for="network-debug">封包分析</label><input id="network-debug" class="preference-switch" type="checkbox" role="switch"></div><div class="settings-update-area"><button id="download-update" class="button primary" type="button" hidden>下載更新</button><p id="update-status" class="form-note" role="status"></p></div>
           </section>
         </div>
@@ -136,6 +137,19 @@
   <p id="connection-progress-name"></p>
   <p id="connection-progress-status" role="status" aria-live="polite">等待遠端回應…</p>
   <div class="modal-actions"><button type="button" class="button" id="connection-progress-cancel">取消連線</button></div>
+ </form>
+</dialog>
+<dialog id="local-update-dialog" aria-labelledby="local-update-title">
+ <form method="dialog">
+  <div class="modal-heading"><h2 id="local-update-title">本地更新</h2><button type="button" class="icon-button" id="local-update-close" aria-label="關閉">×</button></div>
+  <p id="local-update-name" data-no-i18n></p>
+  <p id="local-update-version" data-no-i18n></p>
+  <p id="local-update-status" role="status" aria-live="polite"></p>
+  <progress id="local-update-progress" max="100" value="0" aria-label="套件準備進度"></progress>
+  <p id="local-update-hint" class="form-note">確認後將自動關閉程式、更新並重新啟動，遠端連線會中斷。</p>
+  <p id="local-update-authorization" class="form-note" hidden>更新已安裝的系統服務時，系統會要求管理員授權。</p>
+  <p id="local-update-error" class="form-error" role="alert" hidden></p>
+  <div class="modal-actions"><button type="button" class="button" id="local-update-cancel">取消</button><button type="button" class="button primary" id="local-update-install" disabled>開始更新</button></div>
  </form>
 </dialog>
 <dialog id="release-dialog" aria-labelledby="release-title">

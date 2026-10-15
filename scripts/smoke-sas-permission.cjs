@@ -3,7 +3,7 @@ const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=
 const root=path.resolve(__dirname,'../internal/clientui/web'),origin='https://yourdesk-sas.test';
 const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},library:{groups:[],sites:[]},preferences:{language:'zh-Hant',theme:'light',selectedGroup:'*'},running:{host:true},sessions:{},updates:{},hardwareDetection:{status:'complete'},audioCapabilities:[],prelogin:{supported:true,desktopAccessSupported:true,runtimeProtocol:1,installed:false,sasSupported:true,enabled:false,sasAllowed:false}});
 (async()=>{const browser=await chromium.launch({headless:true});try{
- let state=defaults(),requests=[],errors=[],context,page,failToggle=false;
+ let state=defaults(),requests=[],errors=[],context,page,failToggle=false,failRemoval=false;
  async function reopen(){
   if(context)await context.close();
   context=await browser.newContext();page=await context.newPage();
@@ -22,7 +22,10 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
      state.prelogin.sasDisabled=!body.enabled;
     }else if(request.method()==='POST'&&url.pathname==='/api/prelogin'){
      const body=request.postDataJSON();requests.push({path:url.pathname,body});
-     if(body.secureAttention){state.prelogin.installed=true;state.prelogin.sasAllowed=true;}
+     if(body.remove){
+      if(failRemoval)return route.fulfill({status:400,json:{error:'管理員授權已取消'}});
+      Object.assign(state.prelogin,{installed:false,enabled:false,runtimeProtocol:0});
+     }else if(body.secureAttention){state.prelogin.installed=true;state.prelogin.sasAllowed=true;}
      else if(body.desktopAccess){state.prelogin.installed=body.enabled;}
      else state.prelogin.enabled=body.enabled;
     }
@@ -96,10 +99,38 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
  await page.locator('#ui-desktop-access').click();await page.locator('#confirm-form button[type="submit"]').click();
  await page.waitForFunction(()=>!document.querySelector('#confirm-dialog').open);
  assert(!state.prelogin.installed);assert.deepEqual(serviceRequests().at(-1).body,{enabled:false,desktopAccess:true});
+ // 服務離線、模式損壞或舊版，都可透過獨立移除入口操作；取消及拒絕不改狀態。
+ for(const failure of ['服務停止','模式標記損壞','舊版服務']){
+  state=defaults();Object.assign(state.prelogin,{installed:true,enabled:true,runtimeProtocol:0,error:failure});requests=[];await reopen();
+  await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
+  assert(await page.locator('#ui-desktop-access').isDisabled(),'開機啟動仍開啟時，正常 Switch 保留限制');
+  assert(await page.locator('#remove-system-service').isEnabled(),'服務失效不可阻擋獨立移除');
+  await page.locator('#remove-system-service').click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+  assert.match(await page.locator('#confirm-description').textContent(),/管理員授權/);
+  await page.locator('#confirm-dialog .modal-actions .close').click();assert.equal(serviceRequests().length,0);
+  failRemoval=true;
+  await page.locator('#remove-system-service').click();
+  const rejectedRemove=page.waitForResponse(response=>response.url().endsWith('/api/prelogin')&&response.status()===400);
+  await page.locator('#confirm-form button[type="submit"]').click();await rejectedRemove;
+  await page.waitForFunction(()=>!document.querySelector('#confirm-form button[type="submit"]').disabled);
+  assert(await page.locator('#confirm-dialog').isVisible(),'要求遭拒時保留確認視窗供重試');
+  await page.locator('#confirm-dialog .modal-actions .close').click();
+  assert(state.prelogin.installed&&state.prelogin.enabled,'拒絕管理員授權不能假裝已移除');
+  assert(await page.locator('#remove-system-service').isEnabled());
+  failRemoval=false;
+  await page.locator('#remove-system-service').click();await page.locator('#confirm-form button[type="submit"]').click();
+  await page.waitForFunction(()=>document.querySelector('#remove-service-row').hidden);
+  assert.deepEqual(serviceRequests().map(r=>r.body),[{remove:true},{remove:true}]);
+  assert(!state.prelogin.installed&&!state.prelogin.enabled);assert(!(await page.locator('#ui-prelogin').isChecked()));
+ }
+ // 服務變更期間不接受第二次移除。
+ state=defaults();Object.assign(state.prelogin,{installed:true,enabled:true,busy:true});requests=[];await reopen();
+ await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
+ assert(await page.locator('#remove-system-service').isDisabled());assert.equal(serviceRequests().length,0);
  // 非 Windows 不顯示這個授權開關。
  state=defaults();state.info.platform='darwin';state.prelogin={supported:true,enabled:false};requests=[];await reopen();
  await page.evaluate(()=>{openDialog('#settings-dialog');selectSettingsTab('advanced')});
- assert(!(await page.locator('#desktop-access-row').isVisible()));assert.equal(serviceRequests().length,0);
+ assert(!(await page.locator('#desktop-access-row').isVisible()));assert(!(await page.locator('#remove-service-row').isVisible()));assert.equal(serviceRequests().length,0);
  // 不論舊版有沒有儲存「不再詢問」，啟動與輪詢都不得自動要求授權。
  for(const service of [
   {supported:true,sasSupported:true,enabled:false,sasAllowed:false},
@@ -124,5 +155,5 @@ const defaults=()=>({info:{room:'YD-SMOKE',hostname:'Smoke',platform:'windows'},
  fs.mkdirSync(path.resolve(__dirname,'../.local-run'),{recursive:true});
  await page.locator('#settings-dialog').screenshot({path:path.resolve(__dirname,'../.local-run/sas-switch-smoke.png')});
  assert.deepEqual(errors,[]);
- console.log('PASS: 首次啟動／重開／狀態輪詢均不詢問、不受舊偏好影響、手動開啟並確認才提權、UAC 與開機連線獨立、UAC 不變更 SAS 原則、Mac 隱藏 UAC 開關、取消／關閉／Esc 不呼叫服務、Switch 狀態保留、已授權切換不重複提權、失敗還原');
+ console.log('PASS: 首次啟動／重開／狀態輪詢均不詢問、不受舊偏好影響、手動開啟並確認才提權、UAC 與開機連線獨立、UAC 不變更 SAS 原則、Mac 隱藏 UAC 開關、取消／關閉／Esc 不呼叫服務、Switch 狀態保留、已授權切換不重複提權、失敗還原、故障／舊服務可獨立移除、取消與拒絕不改狀態、變更期間禁止重複移除');
 }finally{await browser.close()}})().catch(error=>{console.error(error);process.exitCode=1});

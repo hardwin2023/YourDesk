@@ -1,4 +1,69 @@
 {
+  "正在確認連線狀態…": [
+    "Checking connection status…",
+    "接続状態を確認中…",
+    "연결 상태 확인 중…"
+  ],
+  "遠端已連線": [
+    "Remote connected",
+    "リモート接続済み",
+    "원격 연결됨"
+  ],
+  "配對服務未連線": [
+    "Pairing service disconnected",
+    "接続サーバーに未接続",
+    "연결 서버에 연결되지 않음"
+  ],
+  "無法確認連線狀態": [
+    "Connection status unavailable",
+    "接続状態を確認できません",
+    "연결 상태를 확인할 수 없음"
+  ],
+  "登入前啟動已開啟": [
+    "Pre-login startup enabled",
+    "ログイン前起動が有効",
+    "로그인 전 시작 켜짐"
+  ],
+  "此 ID 尚未註冊到配對伺服器；已安裝服務不代表連線正常。": [
+    "This ID is not registered with the pairing server. An installed service does not confirm connectivity.",
+    "この ID は接続サーバーに登録されていません。サービスのインストールは接続の正常動作を保証しません。",
+    "이 ID는 연결 서버에 등록되어 있지 않습니다. 서비스가 설치되었다고 연결이 정상인 것은 아닙니다."
+  ],
+  "服務 Host 版本：{0}": [
+    "Service Host version: {0}",
+    "サービス Host のバージョン：{0}",
+    "서비스 Host 버전: {0}"
+  ],
+  "服務版本與 APP 不同；手動替換 ZIP 不會更新已安裝的服務副本。": [
+    "The service and app versions differ. Manually replacing ZIP files does not update the installed service copy.",
+    "サービスとアプリのバージョンが異なります。ZIP の手動置換ではインストール済みのサービスは更新されません。",
+    "서비스와 앱의 버전이 다릅니다. ZIP 파일을 수동으로 교체해도 설치된 서비스 사본은 업데이트되지 않습니다."
+  ],
+  "系統服務": [
+    "System service",
+    "システムサービス",
+    "시스템 서비스"
+  ],
+  "移除系統服務": [
+    "Remove system service",
+    "システムサービスを削除",
+    "시스템 서비스 제거"
+  ],
+  "移除登入前啟動與系統操作服務；服務故障時也可使用。需要管理員授權。": [
+    "Remove the pre-login and system control service. Available even when the service fails. Administrator approval is required.",
+    "ログイン前起動とシステム操作のサービスを削除します。サービスが停止した場合も使用できます。管理者の承認が必要です。",
+    "로그인 전 시작 및 시스템 제어 서비스를 제거합니다. 서비스에 문제가 있어도 사용할 수 있습니다. 관리자 승인이 필요합니다."
+  ],
+  "移除 YourDesk 系統服務？登入前啟動與系統操作授權都會關閉，遠端連線將中斷。接著會要求 Windows 管理員授權；服務故障時也可執行。": [
+    "Remove the YourDesk system service? Pre-login startup and system control authorization will be disabled, and remote connections will end. Windows administrator approval is required. This also works when the service fails.",
+    "YourDesk のシステムサービスを削除しますか？ログイン前起動とシステム操作の許可を解除し、リモート接続を切断します。Windows 管理者の承認が必要です。サービスが停止した場合も実行できます。",
+    "YourDesk 시스템 서비스를 제거할까요? 로그인 전 시작과 시스템 제어 권한이 꺼지고 원격 연결이 끊어집니다. Windows 관리자 승인이 필요하며 서비스에 문제가 있어도 실행할 수 있습니다."
+  ],
+  "無效的系統服務移除要求": [
+    "Invalid system service removal request",
+    "システムサービスの削除要求が無効です",
+    "잘못된 시스템 서비스 제거 요청"
+  ],
   "授權系統操作": [
     "Authorize system control",
     "システム操作を許可",
@@ -154,8 +219,16 @@
     "現在のコンソールセッションでコーデック設定を変更してください。",
     "현재 콘솔 세션에서 코덱 설정을 변경하세요."
   ],
-  "Opus（預設）": ["Opus (default)", "Opus（既定）", "Opus (기본값)"],
-  "聲音編解碼實測": ["Audio codec tests", "音声コーデックの実測", "오디오 코덱 테스트"],
+  "Opus（預設）": [
+    "Opus (default)",
+    "Opus（既定）",
+    "Opus (기본값)"
+  ],
+  "聲音編解碼實測": [
+    "Audio codec tests",
+    "音声コーデックの実測",
+    "오디오 코덱 테스트"
+  ],
   "開啟遠端聲音": [
     "Enable remote audio",
     "リモート音声を有効にする",
@@ -206,10 +279,26 @@
     "ローカル {codec}：利用不可",
     "로컬 {codec}: 사용 불가"
   ],
-  "檔案傳輸視窗意外結束，請查看啟動終端的錯誤訊息。": ["The file transfer window exited unexpectedly. Check the launch terminal for details.", "ファイル転送ウィンドウが予期せず終了しました。起動端末のエラーを確認してください。", "파일 전송 창이 예기치 않게 종료되었습니다. 실행 터미널의 오류를 확인하세요."],
-  "開啟檔案傳輸": ["Open file transfer", "ファイル転送を開く", "파일 전송 열기"],
-  "正在準備檔案傳輸…": ["Preparing file transfer…", "ファイル転送を準備中…", "파일 전송 준비 중…"],
-  "對方尚未支援檔案傳輸，請更新對方的 YourDesk 後再試。": ["The remote device does not support file transfer yet. Update YourDesk on that device and try again.", "接続先はファイル転送に未対応です。接続先の YourDesk を更新してください。", "원격 장치가 파일 전송을 지원하지 않습니다. 원격 YourDesk를 업데이트한 후 다시 시도하세요."],
+  "檔案傳輸視窗意外結束，請查看啟動終端的錯誤訊息。": [
+    "The file transfer window exited unexpectedly. Check the launch terminal for details.",
+    "ファイル転送ウィンドウが予期せず終了しました。起動端末のエラーを確認してください。",
+    "파일 전송 창이 예기치 않게 종료되었습니다. 실행 터미널의 오류를 확인하세요."
+  ],
+  "開啟檔案傳輸": [
+    "Open file transfer",
+    "ファイル転送を開く",
+    "파일 전송 열기"
+  ],
+  "正在準備檔案傳輸…": [
+    "Preparing file transfer…",
+    "ファイル転送を準備中…",
+    "파일 전송 준비 중…"
+  ],
+  "對方尚未支援檔案傳輸，請更新對方的 YourDesk 後再試。": [
+    "The remote device does not support file transfer yet. Update YourDesk on that device and try again.",
+    "接続先はファイル転送に未対応です。接続先の YourDesk を更新してください。",
+    "원격 장치가 파일 전송을 지원하지 않습니다. 원격 YourDesk를 업데이트한 후 다시 시도하세요."
+  ],
   "安裝測試版本": [
     "Install test version",
     "テスト版をインストール",
@@ -3195,5 +3284,135 @@
     "Allow YourDesk to send Ctrl+Alt+Del? This enables the pre-login service and startup at boot. Windows will ask for administrator approval.",
     "YourDesk に Ctrl+Alt+Del の送信を許可しますか？ログイン前接続サービスと起動時の自動実行を有効にします。Windows の管理者承認が必要です。",
     "YourDesk의 Ctrl+Alt+Del 전송을 허용할까요? 로그인 전 연결 서비스와 부팅 시 자동 시작이 활성화되며 Windows 관리자 승인이 필요합니다."
+  ],
+  "本地更新": [
+    "Local update",
+    "ローカル更新",
+    "로컬 업데이트"
+  ],
+  "套件準備進度": [
+    "Package preparation progress",
+    "パッケージ準備の進行状況",
+    "패키지 준비 진행률"
+  ],
+  "確認後將自動關閉程式、更新並重新啟動，遠端連線會中斷。": [
+    "After confirmation, the app will close, update and restart. Remote connections will disconnect.",
+    "確認後、アプリを終了して更新し、再起動します。リモート接続は切断されます。",
+    "확인 후 앱을 종료하고 업데이트한 뒤 다시 시작합니다. 원격 연결이 끊어집니다."
+  ],
+  "更新已安裝的系統服務時，系統會要求管理員授權。": [
+    "Updating an installed system service requires administrator approval.",
+    "インストール済みのシステムサービスを更新する場合、管理者承認が必要です。",
+    "설치된 시스템 서비스를 업데이트할 때 관리자 승인이 필요합니다."
+  ],
+  "正在準備套件…": [
+    "Preparing package…",
+    "パッケージを準備中…",
+    "패키지 준비 중…"
+  ],
+  "套件驗證完成，請確認後開始更新。": [
+    "Package verified. Confirm to start the update.",
+    "パッケージを検証しました。確認して更新を開始してください。",
+    "패키지를 확인했습니다. 확인 후 업데이트를 시작하세요."
+  ],
+  "本地更新未完成。": [
+    "Local update did not complete.",
+    "ローカル更新が完了しませんでした。",
+    "로컬 업데이트를 완료하지 못했습니다."
+  ],
+  "正在取消…": [
+    "Cancelling…",
+    "キャンセル中…",
+    "취소 중…"
+  ],
+  "請選擇此系統的 YourDesk 更新套件。": [
+    "Choose a YourDesk update package for this system.",
+    "このシステム用の YourDesk 更新パッケージを選択してください。",
+    "이 시스템에 맞는 YourDesk 업데이트 패키지를 선택하세요."
+  ],
+  "請選擇此系統的 YourDesk {0} 更新套件。": [
+    "Choose a YourDesk {0} update package for this system.",
+    "このシステム用の YourDesk {0} 更新パッケージを選択してください。",
+    "이 시스템에 맞는 YourDesk {0} 업데이트 패키지를 선택하세요."
+  ],
+  "更新套件必須介於 1 byte 與 2 GB。": [
+    "The update package must be between 1 byte and 2 GB.",
+    "更新パッケージは 1 バイト以上、2 GB 以下である必要があります。",
+    "업데이트 패키지 크기는 1바이트 이상 2GB 이하여야 합니다."
+  ],
+  "套件準備逾時，請重新選擇檔案。": [
+    "Package preparation timed out. Select the file again.",
+    "パッケージの準備がタイムアウトしました。ファイルを再選択してください。",
+    "패키지 준비 시간이 초과되었습니다. 파일을 다시 선택하세요."
+  ],
+  "請先完成或取消本地更新。": [
+    "Complete or cancel the local update first.",
+    "先にローカル更新を完了またはキャンセルしてください。",
+    "먼저 로컬 업데이트를 완료하거나 취소하세요."
+  ],
+  "已有更新進行中，請先完成或取消。": [
+    "An update is already in progress. Complete or cancel it first.",
+    "更新が進行中です。先に完了またはキャンセルしてください。",
+    "업데이트가 이미 진행 중입니다. 먼저 완료하거나 취소하세요."
+  ],
+  "此系統尚不支援本地更新。": [
+    "Local updates are not supported on this system.",
+    "このシステムではローカル更新に対応していません。",
+    "이 시스템에서는 로컬 업데이트를 지원하지 않습니다."
+  ],
+  "本地更新已取消或已過期，請重新選擇套件。": [
+    "The local update was cancelled or expired. Select the package again.",
+    "ローカル更新がキャンセルされたか期限切れです。パッケージを再選択してください。",
+    "로컬 업데이트가 취소되었거나 만료되었습니다. 패키지를 다시 선택하세요."
+  ],
+  "更新交接中，請等待程式重新啟動。": [
+    "The updater is taking over. Wait for the app to restart.",
+    "更新処理を引き継いでいます。再起動をお待ちください。",
+    "업데이트를 인계 중입니다. 앱이 다시 시작될 때까지 기다리세요."
+  ],
+  "更新套件大小不符，請重新選擇檔案。": [
+    "The package size does not match. Select the file again.",
+    "パッケージのサイズが一致しません。ファイルを再選択してください。",
+    "패키지 크기가 일치하지 않습니다. 파일을 다시 선택하세요."
+  ],
+  "更新套件的版本資訊無效。": [
+    "The package version information is invalid.",
+    "パッケージのバージョン情報が無効です。",
+    "패키지 버전 정보가 올바르지 않습니다."
+  ],
+  "套件尚未驗證完成，或本地更新已取消。": [
+    "Package verification is incomplete, or the local update was cancelled.",
+    "パッケージの検証が未完了か、ローカル更新がキャンセルされました。",
+    "패키지 확인이 완료되지 않았거나 로컬 업데이트가 취소되었습니다."
+  ],
+  "更新暫存套件遺失或內容已變更，請重新選擇檔案。": [
+    "The staged package is missing or has changed. Select the file again.",
+    "一時保存したパッケージが見つからないか変更されています。ファイルを再選択してください。",
+    "임시 패키지가 없거나 변경되었습니다. 파일을 다시 선택하세요."
+  ],
+  "更新套件缺少版本說明，請選擇完整 Portable ZIP。": [
+    "Version information is missing. Select a complete Portable ZIP.",
+    "バージョン情報がありません。完全な Portable ZIP を選択してください。",
+    "버전 정보가 없습니다. 완전한 Portable ZIP을 선택하세요."
+  ],
+  "本地更新準備失敗：{0}": [
+    "Local update preparation failed: {0}",
+    "ローカル更新の準備に失敗しました：{0}",
+    "로컬 업데이트 준비 실패: {0}"
+  ],
+  "Portable ZIP 驗證失敗：{0}": [
+    "Portable ZIP verification failed: {0}",
+    "Portable ZIP の検証に失敗しました：{0}",
+    "Portable ZIP 확인 실패: {0}"
+  ],
+  "更新套件上傳失敗：{0}": [
+    "Package upload failed: {0}",
+    "パッケージのアップロードに失敗しました：{0}",
+    "패키지 업로드 실패: {0}"
+  ],
+  "更新套件缺少 YourDesk.app。": [
+    "YourDesk.app is missing from the package.",
+    "パッケージに YourDesk.app がありません。",
+    "패키지에 YourDesk.app이 없습니다."
   ]
 }

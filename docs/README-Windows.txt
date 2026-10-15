@@ -10,10 +10,12 @@ Antivirus notice: some antivirus products currently flag YourDesk. Our empty Go 
 
 繁體中文
 --------------------
-登入前啟動（實驗性功能）：在進階設定開啟後，經管理員授權安裝 Windows 自動啟動服務；開機後不需先登入，即啟動 Host，登入後持續運作。關閉時亦需管理員授權。APP 內更新會自動交接服務，首次安裝或舊服務遷移需一次 UAC，後續支援的更新沿用已授權服務。手動替換 ZIP 內容或移除程式前仍請先停用服務；APP 內的 ZIP 自動更新沿用服務交接；不支援 BitLocker 開機前解鎖，登入畫面操作仍待實機驗證。
+登入前啟動（實驗性功能）：在進階設定開啟後，經管理員授權安裝 Windows 自動啟動服務；開機後不需先登入，即啟動 Host，登入後持續運作。關閉時亦需管理員授權。APP 內更新會自動交接服務，首次安裝或舊服務遷移需一次 UAC，後續支援的更新沿用已授權服務。手動替換 ZIP 內容或移除程式前，請在進階設定使用「移除系統服務」；只關閉「登入前啟動」仍會保留系統操作服務。APP 內的 ZIP 自動更新沿用服務交接；不支援 BitLocker 開機前解鎖，登入畫面操作仍待實機驗證。
+
+設定 → 關於 → 本地更新：選擇完整 Portable ZIP，可離線升版、同版重裝或回退，不受版本高低限制。驗證後按「開始更新」，自動關閉、同步替換 APP／已安裝服務並重開；保留設定與服務模式。更新受保護服務時需本次 UAC 授權，線上 OTA 流程不變。舊版若沒有此按鈕，仍需先手動安裝新版。
 
 下載符合電腦架構的 -portable.zip，完整解壓縮到具有寫入權限的資料夾，再執行 YourDesk.exe。需要 Microsoft Edge WebView2 Runtime。
-Windows 發布與 APP 自動更新均使用 ZIP，不提供 setup.exe 安裝包。-service.zip 僅供已授權的登入前服務更新，不是一般啟動套件。舊版本若無法辨識 Portable ZIP，請從 GitHub Release 手動下載；手動替換前須先退出 APP，若已啟用登入前服務，另須先停用服務。
+Windows 發布與 APP 自動更新均使用 ZIP，不提供 setup.exe 安裝包。-service.zip 僅供已授權的登入前服務更新，不是一般啟動套件。舊版本若無法辨識 Portable ZIP，請從 GitHub Release 手動下載；手動替換前先在進階設定「移除系統服務」（需管理員授權），再退出 APP、完整解壓並替換檔案；可先用一般 Host 測試，再依需要重新授權。只替換 ZIP 不會更新已安裝的服務副本。
 新增站台並輸入對方 ID，選擇桌面或命令列圖示，再輸入對方密碼。雙擊站台可選擇模式。
 設定 → 網路安全可修改本機連線密碼。關閉視窗後仍常駐；從 Tray 選擇關閉程式才會結束。
 
@@ -27,10 +29,12 @@ CLI：-signal 指定配對伺服器；-print-uid 顯示裝置 ID；-print-secret
 
 English
 --------------------
-Start before login (experimental): enable it in Advanced Settings to install an automatic Windows service with administrator approval. The Host starts at boot before sign-in and continues after sign-in. Disabling also requires approval. In-app updates hand off the service automatically. Initial installation or legacy migration needs one UAC approval; subsequent supported updates use the authorized service. Turn the service off before manually replacing ZIP contents or removing the app. In-app ZIP updates use the service handoff. BitLocker pre-boot unlock is unsupported; login-screen control still requires on-device validation.
+Start before login (experimental): enable it in Advanced Settings to install an automatic Windows service with administrator approval. The Host starts at boot before sign-in and continues after sign-in. Disabling also requires approval. In-app updates hand off the service automatically. Initial installation or legacy migration needs one UAC approval; subsequent supported updates use the authorized service. Before manually replacing ZIP contents or removing the app, use Remove system service in Advanced Settings. Turning off pre-login startup alone retains the system control service. In-app ZIP updates use the service handoff. BitLocker pre-boot unlock is unsupported; login-screen control still requires on-device validation.
+
+Settings → About → Local update: choose a complete Portable ZIP to upgrade, reinstall or roll back offline without a version-order restriction. After verification, confirm to close, replace the app and installed service, then restart; settings and service modes are preserved. Updating a protected service needs UAC approval for this local package; online OTA is unchanged. Older versions without this button require a manual upgrade first.
 
 Download the -portable.zip for your architecture, extract all files to a writable folder, and run YourDesk.exe. Microsoft Edge WebView2 Runtime is required.
-Windows releases and in-app updates use ZIP; setup.exe installers are not published. The -service.zip is only for updating an authorized pre-login service, not for launching the app. If an older version cannot recognize Portable ZIP, download it manually from GitHub Releases. Quit the app and disable any enabled pre-login service before manually replacing files.
+Windows releases and in-app updates use ZIP; setup.exe installers are not published. The -service.zip is only for updating an authorized pre-login service, not for launching the app. If an older version cannot recognize Portable ZIP, download it manually from GitHub Releases. Before manually replacing files, select Remove system service in Advanced Settings with administrator approval, then quit the app and extract all replacement files. Test with the normal Host before reauthorizing the service if needed. Replacing ZIP contents alone does not update the installed service copy.
 Add a site with the remote ID, choose Desktop or Terminal, then enter the remote password. Double-click a site to choose a mode.
 Change the local connection password in Settings → Network Security. Closing the window keeps the app running; choose Quit in the tray menu to exit.
 
@@ -44,10 +48,12 @@ Set the password for this run with -secret "your password"; no JSON input is nee
 
 日本語
 --------------------
-ログイン前の起動（実験的機能）：詳細設定から管理者の許可で Windows 自動起動サービスをインストールします。ログイン前に Host が起動し、ログイン後も継続します。無効化にも管理者の許可が必要です。アプリ内更新ではサービスを自動で引き継ぎます。初回導入や旧サービス移行は一度 UAC 承認が必要で、以後の対応更新は承認済みサービスを使います。ZIP の内容を手動で置き換える場合やアプリを削除する前にはサービスを無効にしてください。アプリ内の ZIP 自動更新はサービスの引き継ぎを使用します。BitLocker の起動前解除には非対応で、ログイン画面の操作は実機確認が必要です。
+ログイン前の起動（実験的機能）：詳細設定から管理者の許可で Windows 自動起動サービスをインストールします。ログイン前に Host が起動し、ログイン後も継続します。無効化にも管理者の許可が必要です。アプリ内更新ではサービスを自動で引き継ぎます。初回導入や旧サービス移行は一度 UAC 承認が必要で、以後の対応更新は承認済みサービスを使います。ZIP の手動置換やアプリの削除前には、詳細設定の「システムサービスを削除」を使用してください。ログイン前起動をオフにするだけではシステム操作サービスは残ります。アプリ内の ZIP 自動更新はサービスの引き継ぎを使用します。BitLocker の起動前解除には非対応で、ログイン画面の操作は実機確認が必要です。
+
+設定 → バージョン情報 → ローカル更新：完全な Portable ZIP でオフライン更新・同版再インストール・旧版への復帰ができます。バージョンの新旧は制限しません。検証後に確認すると APP と既存サービスを更新して再起動し、設定とサービスモードを保持します。保護されたサービスの更新には今回の UAC 承認が必要です。オンライン OTA は変更しません。ボタンのない旧版は先に手動更新してください。
 
 対応するアーキテクチャの -portable.zip をダウンロードし、書き込み可能なフォルダーに全て展開して YourDesk.exe を実行します。Microsoft Edge WebView2 Runtime が必要です。
-Windows の配布とアプリ内更新は ZIP を使用し、setup.exe インストーラーは公開しません。-service.zip は承認済みのログイン前サービスの更新専用で、通常の起動用ではありません。旧版が Portable ZIP を認識しない場合は GitHub Releases から手動で取得してください。ファイルを手動で置き換える前にアプリを終了し、有効なログイン前サービスも無効にしてください。
+Windows の配布とアプリ内更新は ZIP を使用し、setup.exe インストーラーは公開しません。-service.zip は承認済みのログイン前サービスの更新専用で、通常の起動用ではありません。旧版が Portable ZIP を認識しない場合は GitHub Releases から手動で取得してください。手動置換前に、詳細設定の「システムサービスを削除」を管理者承認で実行し、アプリを終了して全ファイルを展開・置換してください。通常の Host で確認し、必要に応じてサービスを再承認します。ZIP の置換だけではインストール済みのサービスは更新されません。
 接続先の ID を登録し、デスクトップまたはターミナルを選んで相手のパスワードを入力します。ダブルクリックでもモードを選べます。
 本機の接続パスワードは設定 → ネットワークセキュリティで変更します。ウィンドウを閉じても常駐するため、終了はトレイメニューから行います。
 
@@ -61,10 +67,12 @@ CLI：-signal は配対サーバー、-print-uid は装置 ID 表示、-print-se
 
 한국어
 --------------------
-로그인 전 시작(실험적 기능): 고급 설정에서 관리자 승인으로 Windows 자동 시작 서비스를 설치합니다. 부팅 시 로그인 전에 Host가 시작되며 로그인 후에도 계속 실행됩니다. 끌 때도 승인이 필요합니다. 앱 내 업데이트는 서비스를 자동으로 인계합니다. 최초 설치나 구형 서비스 이전은 한 번의 UAC 승인이 필요하며 이후 지원 업데이트는 승인된 서비스를 사용합니다. ZIP 내용을 수동으로 교체하거나 앱을 제거하기 전에는 서비스를 꺼 주세요. 앱 내 ZIP 자동 업데이트는 서비스 인계를 사용합니다. BitLocker 부팅 전 잠금 해제는 지원하지 않으며 로그인 화면 제어는 실제 장치에서 확인이 필요합니다.
+로그인 전 시작(실험적 기능): 고급 설정에서 관리자 승인으로 Windows 자동 시작 서비스를 설치합니다. 부팅 시 로그인 전에 Host가 시작되며 로그인 후에도 계속 실행됩니다. 끌 때도 승인이 필요합니다. 앱 내 업데이트는 서비스를 자동으로 인계합니다. 최초 설치나 구형 서비스 이전은 한 번의 UAC 승인이 필요하며 이후 지원 업데이트는 승인된 서비스를 사용합니다. ZIP 내용을 수동으로 교체하거나 앱을 제거하기 전에 고급 설정에서 시스템 서비스 제거를 실행하세요. 로그인 전 시작만 꺼도 시스템 제어 서비스는 남아 있습니다. 앱 내 ZIP 자동 업데이트는 서비스 인계를 사용합니다. BitLocker 부팅 전 잠금 해제는 지원하지 않으며 로그인 화면 제어는 실제 장치에서 확인이 필요합니다.
+
+설정 → 정보 → 로컬 업데이트: 완전한 Portable ZIP으로 오프라인 업그레이드, 동일 버전 재설치 및 이전 버전 복귀가 가능합니다. 버전 순서는 제한하지 않습니다. 확인 후 앱과 설치된 서비스를 교체하고 다시 시작하며 설정과 서비스 모드를 유지합니다. 보호된 서비스는 이번 패키지에 대한 UAC 승인이 필요하며 온라인 OTA는 그대로입니다. 버튼이 없는 구버전은 먼저 수동 업데이트하세요.
 
 컴퓨터 아키텍처에 맞는 -portable.zip을 다운로드하고 쓰기 가능한 폴더에 모든 파일을 압축 해제한 다음 YourDesk.exe를 실행하세요. Microsoft Edge WebView2 Runtime이 필요합니다.
-Windows 배포와 앱 내 업데이트는 ZIP을 사용하며 setup.exe 설치 프로그램은 게시하지 않습니다. -service.zip은 승인된 로그인 전 서비스의 업데이트 전용이며 일반 앱 실행용이 아닙니다. 구버전에서 Portable ZIP을 인식하지 못하면 GitHub Releases에서 직접 다운로드하세요. 파일을 수동으로 교체하기 전에 앱을 종료하고 활성화된 로그인 전 서비스도 꺼 주세요.
+Windows 배포와 앱 내 업데이트는 ZIP을 사용하며 setup.exe 설치 프로그램은 게시하지 않습니다. -service.zip은 승인된 로그인 전 서비스의 업데이트 전용이며 일반 앱 실행용이 아닙니다. 구버전에서 Portable ZIP을 인식하지 못하면 GitHub Releases에서 직접 다운로드하세요. 수동 교체 전에 고급 설정에서 관리자 승인으로 시스템 서비스 제거를 실행한 다음 앱을 종료하고 모든 파일을 압축 해제하여 교체하세요. 일반 Host로 먼저 확인한 후 필요하면 서비스를 다시 승인하세요. ZIP 내용만 교체해도 설치된 서비스 사본은 업데이트되지 않습니다.
 상대 장치 ID로 연결을 추가하고 데스크톱 또는 터미널을 선택한 뒤 상대 암호를 입력하세요. 더블 클릭으로도 모드를 선택할 수 있습니다.
 로컬 연결 암호는 설정 → 네트워크 보안에서 변경합니다. 창을 닫아도 실행되므로 완전히 종료하려면 트레이 메뉴를 사용하세요.
 

@@ -23,6 +23,7 @@
 #include <cstdio>
 #include "readback.h"
 #include "video_color.h"
+#include "encoder_controls.h"
 using Microsoft::WRL::ComPtr;
 static thread_local char ydFailure[1024]{};
 static HRESULT traceFailure(HRESULT hr,const char *step){
@@ -44,6 +45,7 @@ struct GPU {
  ComPtr<IMFDXGIDeviceManager> manager;
  ComPtr<ID3D11Texture2D> upload,target,staging;
  ComPtr<ID3D11VideoProcessorEnumerator> enumerator;ComPtr<ID3D11VideoProcessor> processor;
+ std::vector<unsigned char> bgraUpload;
  int sw=0,sh=0,dw=0,dh=0;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
  std::string name;
  HRESULT open(IDXGIAdapter *selected=nullptr){
@@ -94,8 +96,17 @@ struct GPU {
  HRESULT rgba(const unsigned char *src,int w,int h,int stride,int ow,int oh,DXGI_FORMAT fmt){
   CHECK(prepare(w,h,ow,oh,fmt));
   // Video Processor 輸入不能僅有 SHADER_RESOURCE；使用規格允許的 RENDER_TARGET。
-  if(!upload)CHECK(texture(w,h,DXGI_FORMAT_R8G8B8A8_UNORM,D3D11_BIND_RENDER_TARGET,D3D11_USAGE_DEFAULT,0,&upload));
-  context->UpdateSubresource(upload.Get(),0,nullptr,src,stride,0);
+  UINT support=0;HRESULT inputSupport=enumerator->CheckVideoProcessorFormat(DXGI_FORMAT_R8G8B8A8_UNORM,&support);
+  DXGI_FORMAT inputFormat=DXGI_FORMAT_R8G8B8A8_UNORM;
+  const unsigned char *pixels=src;int inputStride=stride;
+  if(FAILED(inputSupport)||!(support&D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT)){
+   CHECK(enumerator->CheckVideoProcessorFormat(DXGI_FORMAT_B8G8R8A8_UNORM,&support));
+   if(!(support&D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT))return E_NOINTERFACE;
+   inputFormat=DXGI_FORMAT_B8G8R8A8_UNORM;inputStride=w*4;
+   bgraUpload.resize((size_t)w*h*4);yd_rgba_to_bgra(src,stride,bgraUpload.data(),inputStride,w,h);pixels=bgraUpload.data();
+  }
+  if(!upload)CHECK(texture(w,h,inputFormat,D3D11_BIND_RENDER_TARGET,D3D11_USAGE_DEFAULT,0,&upload));
+  context->UpdateSubresource(upload.Get(),0,nullptr,pixels,inputStride,0);
   return convert(upload.Get(),0,w,h,ow,oh,fmt);
  }
  HRESULT read(unsigned char *out,int stride){
@@ -222,7 +233,7 @@ static HRESULT adapterTransforms(const GUID &category,UINT32 flags,const MFT_REG
 }
 struct yd_media {
  GPU gpu;Transform transform;int mode,w=0,h=0,rate=0,fps=30,quality=0,gop=1;LONGLONG sequence=0;
- bool com=false,mf=false,softwareDecode=false,requestedSoftware=false;GUID decodeCodec=MFVideoFormat_H264,encodeCodec=MFVideoFormat_H264;std::string backend;
+ bool com=false,mf=false,softwareDecode=false,requestedSoftware=false,forceKeyframes=false;GUID decodeCodec=MFVideoFormat_H264,encodeCodec=MFVideoFormat_H264;std::string backend;
  explicit yd_media(int value):mode(value){softwareDecode=requestedSoftware=value==3;}
  ~yd_media(){transform.reset();gpu=GPU();if(mf)MFShutdown();if(com)CoUninitialize();}
  HRESULT open(){CHECK(CoInitializeEx(nullptr,COINIT_MULTITHREADED));com=true;CHECK(MFStartup(MF_VERSION,MFSTARTUP_FULL));mf=true;if(mode==0){CHECK(gpu.open());backend="D3D11 / "+gpu.name;}return S_OK;}
@@ -248,28 +259,36 @@ struct yd_media {
  }
  HRESULT encoder(int width,int height,int bitrate,int frames,int q,int keyInterval){
   if(transform.mft&&w==width&&h==height&&rate==bitrate&&fps==frames&&quality==q&&gop==keyInterval)return S_OK;
+  const UINT32 nominalRate=yd_encoder_bitrate(bitrate,width,height,frames,q);
+  const char *control="";
   MFT_REGISTER_TYPE_INFO in={MFMediaType_Video,MFVideoFormat_NV12},out={MFMediaType_Video,encodeCodec};
   HRESULT result=selectTransform(MFT_CATEGORY_VIDEO_ENCODER,MFT_ENUM_FLAG_HARDWARE|MFT_ENUM_FLAG_SORTANDFILTER,in,out,[&](IMFActivate *act)->HRESULT{
+    return yd_try_encoder_controls(bitrate,[&](yd_encoder_control mode)->HRESULT{
+    ydFailure[0]=0;
     CHECK(transform.attach(act,gpu,false));ComPtr<IMFMediaType> input,output;
-    CHECK(mediaType(encodeCodec,width,height,frames,output));// Quality 模式忽略平均碼率；保留正值以滿足媒體型別格式要求。
+    CHECK(mediaType(encodeCodec,width,height,frames,output));
     CHECK(output->SetUINT32(MF_MT_YUV_MATRIX,MFVideoTransferMatrix_BT709));CHECK(output->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE,MFNominalRange_16_235));
-    CHECK(output->SetUINT32(MF_MT_AVG_BITRATE,bitrate>0?bitrate:1));if(encodeCodec==MFVideoFormat_H264)output->SetUINT32(MF_MT_MPEG2_PROFILE,eAVEncH264VProfile_Base);
-    CHECK(setCodec(transform.mft.Get(),CODECAPI_AVEncCommonRateControlMode,bitrate>0?eAVEncCommonRateControlMode_CBR:eAVEncCommonRateControlMode_Quality));
-    if(bitrate<=0)CHECK(setCodec(transform.mft.Get(),CODECAPI_AVEncCommonQuality,q));
+    CHECK(output->SetUINT32(MF_MT_AVG_BITRATE,nominalRate));if(encodeCodec==MFVideoFormat_H264&&mode!=yd_encoder_control::media_type)output->SetUINT32(MF_MT_MPEG2_PROFILE,eAVEncH264VProfile_Base);
+    if(mode!=yd_encoder_control::media_type)CHECK(setCodec(transform.mft.Get(),CODECAPI_AVEncCommonRateControlMode,mode==yd_encoder_control::quality?eAVEncCommonRateControlMode_Quality:eAVEncCommonRateControlMode_CBR));
+    if(mode==yd_encoder_control::quality)CHECK(setCodec(transform.mft.Get(),CODECAPI_AVEncCommonQuality,q));
     CHECK(transform.mft->SetOutputType(transform.output,output.Get(),0));CHECK(mediaType(MFVideoFormat_NV12,width,height,frames,input));
     CHECK(input->SetUINT32(MF_MT_YUV_MATRIX,MFVideoTransferMatrix_BT709));CHECK(input->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE,MFNominalRange_16_235));
     CHECK(transform.mft->SetInputType(transform.input,input.Get(),0));
-    if(bitrate>0)CHECK(setCodec(transform.mft.Get(),CODECAPI_AVEncCommonMeanBitRate,bitrate));
+    if(mode==yd_encoder_control::cbr)CHECK(setCodec(transform.mft.Get(),CODECAPI_AVEncCommonMeanBitRate,nominalRate));
     // GOP 關閉 B 幀重排，第一張與每個週期要求 IDR。
     HRESULT intervalResult=setCodec(transform.mft.Get(),CODECAPI_AVEncMPVGOPSize,keyInterval);
     setCodec(transform.mft.Get(),CODECAPI_AVEncMPVDefaultBPictureCount,0);
     HRESULT force=setCodec(transform.mft.Get(),CODECAPI_AVEncVideoForceKeyFrame,1);
     if(FAILED(intervalResult)&&FAILED(force))return force;
-    CHECK(transform.begin());return S_OK;
+    forceKeyframes=SUCCEEDED(force);
+    CHECK(transform.begin());
+    control=mode==yd_encoder_control::quality?"quality":mode==yd_encoder_control::cbr?"CBR":"media type rate";
+    return S_OK;
+    });
    });
   if(FAILED(result)){transform.reset();return result;}
   w=width;h=height;rate=bitrate;fps=frames;quality=q;gop=keyInterval;sequence=0;
-  backend=std::string(encodeCodec==MFVideoFormat_AV1?"Media Foundation AV1 encoder / ":"Media Foundation H.264 encoder / ")+transform.name+" / "+gpu.name+(transform.d3d?" / GPU NV12":" / CPU NV12 transfer");return S_OK;
+  backend=std::string(encodeCodec==MFVideoFormat_AV1?"Media Foundation AV1 encoder / ":encodeCodec==MFVideoFormat_HEVC?"Media Foundation HEVC encoder / ":"Media Foundation H.264 encoder / ")+transform.name+" / "+gpu.name+(transform.d3d?" / GPU NV12":" / CPU NV12 transfer")+" / "+control;ydFailure[0]=0;return S_OK;
  }
  HRESULT decodeOutput(){
   for(DWORD i=0;i<64;i++){
@@ -337,7 +356,7 @@ extern "C" int yd_media_encode(yd_media *m,const unsigned char *src,int w,int h,
  if(m->transform.d3d){CHECK(MFCreateSample(&input));CHECK(MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D),m->gpu.target.Get(),0,FALSE,&buffer));CHECK(buffer->SetCurrentLength((DWORD)((size_t)w*h*3/2)));CHECK(input->AddBuffer(buffer.Get()));}
  else {std::vector<unsigned char> pixels((size_t)w*h*3/2);CHECK(m->gpu.read(pixels.data(),w));CHECK(memorySample(pixels.data(),pixels.size(),input));}
  input->SetSampleTime(m->sequence*10000000/fps);input->SetSampleDuration(10000000/fps);m->sequence++;
- if((m->sequence-1)%m->gop==0)CHECK(setCodec(m->transform.mft.Get(),CODECAPI_AVEncVideoForceKeyFrame,1));
+ if(m->forceKeyframes&&(m->sequence-1)%m->gop==0)CHECK(setCodec(m->transform.mft.Get(),CODECAPI_AVEncVideoForceKeyFrame,1));
  CHECK(m->transform.send(input.Get()));if(m->gop==1)CHECK(m->transform.startDrain());ComPtr<IMFSample> sample;CHECK(m->transform.receive(sample));if(m->gop==1)CHECK(m->transform.finishDrain());
  CHECK(sample->ConvertToContiguousBuffer(&buffer));BYTE *data=nullptr;DWORD size=0;CHECK(buffer->Lock(&data,nullptr,&size));
  if(size==0||size>maxFrame){buffer->Unlock();return E_FAIL;}
@@ -599,8 +618,8 @@ extern "C" int yd_media_probe(int codec,int format,int w,int h,yd_media_probe_re
 extern "C" int yd_media_probe_software(int codec,int format,int w,int h,yd_media_probe_result *out){return probeCodec(true,codec,format,w,h,out);}
 
 extern "C" int yd_media_encode_format(yd_media *m,int codec,const unsigned char *src,int w,int h,int stride,int bitrate,int fps,int quality,int gop,yd_media_output *out) {
- if(!m||(codec!=1&&codec!=3))return E_INVALIDARG;
- GUID kind=codec==3?MFVideoFormat_AV1:MFVideoFormat_H264;
+ if(!m||(codec!=1&&codec!=2&&codec!=3))return E_INVALIDARG;
+ GUID kind=codec==3?MFVideoFormat_AV1:codec==2?MFVideoFormat_HEVC:MFVideoFormat_H264;
  if(m->encodeCodec!=kind){m->transform.reset();m->encodeCodec=kind;m->sequence=0;}
  return yd_media_encode(m,src,w,h,stride,bitrate,fps,quality,gop,out);
 }

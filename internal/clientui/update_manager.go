@@ -48,6 +48,8 @@ type updateStatus struct {
 	DownloadError    string              `json:"downloadError"`
 	OpenError        string              `json:"openError"`
 	Opening          bool                `json:"opening"`
+	LocalExtension   string              `json:"localExtension,omitempty"`
+	Local            *localUpdateStatus  `json:"local,omitempty"`
 }
 type updateManager struct {
 	openPackage func(context.Context, string) error
@@ -60,6 +62,7 @@ type updateManager struct {
 	ctx         context.Context
 	notify      chan struct{}
 	forceUpdate bool
+	local       *localUpdate
 }
 
 func newUpdateManager(ctx context.Context, dir string) *updateManager {
@@ -86,6 +89,7 @@ func newUpdateManager(ctx context.Context, dir string) *updateManager {
 		}
 	}
 	localNotes := readLocalReleaseNotes()
+	u.state.Local = nil // 本地暫存工作不跨啟動沿用。
 	u.state.Downloading = false
 	u.state.InstallAt = 0
 	u.state.Opening = false
@@ -142,6 +146,11 @@ func (u *updateManager) snapshotLocked() updateStatus {
 	state := u.state
 	// 能力依目前平台／套件推導，不信任上一版寫入的狀態。
 	state.AutomaticInstall = automaticUpdateSupported(runtime.GOOS, state.Asset.Name)
+	state.LocalExtension = localUpdateExtension(runtime.GOOS)
+	if u.local != nil {
+		local := u.local.status
+		state.Local = &local
+	}
 	return state
 }
 func (u *updateManager) snapshot() updateStatus {
@@ -195,7 +204,7 @@ func (u *updateManager) check(ctx context.Context, manual bool, force ...bool) u
 func (u *updateManager) checkChannel(ctx context.Context, manual, force, prerelease bool) updateStatus {
 	u.checkMu.Lock()
 	defer u.checkMu.Unlock()
-	if state := u.snapshot(); state.Downloading || state.Opening || state.InstallAt > 0 || (!manual && state.Prerelease && state.Available && time.Since(state.CheckedAt) < updateInterval) {
+	if state := u.snapshot(); state.Downloading || state.Opening || state.InstallAt > 0 || localUpdateBusy(state.Local) || (!manual && state.Prerelease && state.Available && time.Since(state.CheckedAt) < updateInterval) {
 		return state
 	}
 	result, err := fetchReleaseChannel(ctx, prerelease)
@@ -204,7 +213,7 @@ func (u *updateManager) checkChannel(ctx context.Context, manual, force, prerele
 		result.Message = "更新流程測試：可下載目前的正式版本。"
 	}
 	u.mu.Lock()
-	if u.state.Downloading || u.state.Opening || u.state.InstallAt > 0 {
+	if u.state.Downloading || u.state.Opening || u.state.InstallAt > 0 || u.localBusyLocked() {
 		state := u.snapshotLocked()
 		u.mu.Unlock()
 		return state
@@ -424,6 +433,9 @@ func (u *updateManager) startDownload(onOpened func()) error {
 	if u.ctx.Err() != nil {
 		return fmt.Errorf("下載失敗，請稍後重試。")
 	}
+	if u.localBusyLocked() {
+		return fmt.Errorf("請先完成或取消本地更新。")
+	}
 	if u.decision != nil {
 		return nil
 	}
@@ -640,6 +652,9 @@ func downloadRelease(ctx context.Context, asset releaseAsset, progress func(int6
 func (s *server) handleUpdates(w http.ResponseWriter, r *http.Request) bool {
 	if s.updater == nil {
 		return false
+	}
+	if s.handleLocalUpdates(w, r) {
+		return true
 	}
 	switch {
 	case r.URL.Path == "/api/updates" && r.Method == "GET":

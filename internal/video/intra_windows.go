@@ -13,22 +13,24 @@ import (
 )
 
 type windowsEncoder struct {
-	codec        WireCodec
-	sequence     []byte
-	mu           sync.Mutex
-	session      *winmedia.Session
-	pixels       *image.RGBA
-	bitrate, fps int
-	gop          int
-	backend      string
-	closed       bool
+	codec         WireCodec
+	sequence      []byte
+	hevcSets      hevcParameterSets
+	configuration [6]int
+	mu            sync.Mutex
+	session       *winmedia.Session
+	pixels        *image.RGBA
+	bitrate, fps  int
+	gop           int
+	backend       string
+	closed        bool
 }
 
 func NewIntraEncoder(codec Codec) (IntraEncoder, error) {
 	if codec == CodecSoftwareAV1 {
 		return newSoftwareAV1Encoder()
 	}
-	if codec != CodecHardwareH264 && codec != CodecHardwareAV1 {
+	if codec != CodecHardwareH264 && codec != CodecHardwareHEVC && codec != CodecHardwareAV1 {
 		return nil, ErrVideoUnavailable
 	}
 	session, err := winmedia.New(1)
@@ -56,6 +58,8 @@ func (e *windowsEncoder) Close() error {
 		e.closed = true
 		e.session.Close()
 		e.pixels = nil
+		e.hevcSets = hevcParameterSets{}
+		e.sequence = nil
 	}
 	return nil
 }
@@ -84,15 +88,27 @@ func (e *windowsEncoder) Encode(src image.Image, quality int) ([]byte, error) {
 	if h > b.Dy() {
 		copy(e.pixels.Pix[(h-1)*e.pixels.Stride:], e.pixels.Pix[(h-2)*e.pixels.Stride:(h-1)*e.pixels.Stride])
 	}
-	// 與 Mac 一致：零碼率使用品質控制，僅快速模式指定碼率。
+	// 零碼率優先使用品質控制；驅動不支援時由同一硬體後端協商備援模式。
 	rate := max(0, e.bitrate)
-	data, config, backend, err := e.session.EncodeCodec(e.pixels, rate, e.fps, max(1, min(100, quality)), e.gop, int(e.codec))
+	q := max(1, min(100, quality))
+	configuration := [6]int{w, h, rate, e.fps, q, e.gop}
+	if configuration != e.configuration {
+		e.hevcSets = hevcParameterSets{}
+		e.sequence = nil
+		e.configuration = configuration
+	}
+	data, config, backend, err := e.session.EncodeCodec(e.pixels, rate, e.fps, q, e.gop, int(e.codec))
 	if err != nil {
+		e.hevcSets = hevcParameterSets{}
+		e.sequence = nil
 		return nil, err
 	}
 	e.backend = backend
 	if e.codec == WireAV1 {
 		return packAV1(data, config, &e.sequence)
+	}
+	if e.codec == WireHEVC {
+		return packHEVC(data, config, &e.hevcSets)
 	}
 	return packH264(data, config)
 }

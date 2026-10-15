@@ -102,6 +102,7 @@ let confirmCancelAction = null;
 let groupDrag = null;
 let siteDrag = null;
 let sitePresence = {};
+let localPresence = null;
 const siteRecovery = new Map();
 let passwordReminderDismissed = false;
 let checkingPresence = false;
@@ -129,6 +130,7 @@ function toast(message, error = false, { warning = false, duration = 4500 } = {}
     let warning = dialog.querySelector('.form-error');
     if (!warning) { warning = text('p', '', 'form-error'); warning.setAttribute('role', 'alert'); dialog.querySelector('form').append(warning); }
     warning.textContent = i18n.t(message);
+    warning.hidden = false;
     return;
   }
   clearTimeout(toastTimer);
@@ -167,7 +169,7 @@ function openDialog(id) {
     $('#startup-optimization-dialog').close();
   }
   const dialog = $(id);
-  dialog.querySelectorAll('.form-error').forEach(el => el.remove());
+  dialog.querySelectorAll('.form-error').forEach(el => { if(el.id){el.hidden=true;el.textContent='';}else el.remove(); });
   dialog.showModal();
   // 標題可供鍵盤查看泡泡，但初始焦點應落在實際操作欄位。
   const visible = el => !el.disabled && el.getClientRects().length > 0;
@@ -239,9 +241,30 @@ function applySiteCapabilities(card,site) {
  const diagnostic=card.querySelector('[data-connect-mode="diagnostics"]');if(diagnostic)diagnostic.disabled=recovering||siteCapability(site,'desktop')===false;
 }
 function serviceManaged(service) { return !!(service?.installed||service?.enabled); }
+function localPresenceRoom() {
+ return serviceManaged(state?.prelogin)?state.prelogin.room||'':state?.info?.room||'';
+}
+function renderHostStatus() {
+ const service=state.prelogin,managed=serviceManaged(service);
+ const presence=localPresence?.room===localPresenceRoom()?localPresence:null;
+ let label='正在確認連線狀態…',status='unknown';
+ if(state.incomingConnected){label='遠端已連線';status='connected';}
+ else if(presence?.online===true){label='一切就緒';status='online';}
+ else if(presence?.online===false){label='配對服務未連線';status='offline';}
+ else if(presence){label='無法確認連線狀態';}
+ $('#host-status').textContent=i18n.t(label);
+ const badge=$('.local-badge');badge.dataset.state=status;
+ const details=[`${state.info.hostname} · ${state.info.platform} / ${state.info.architecture}`];
+ if(managed)details.push(i18n.t(service.enabled?'登入前啟動已開啟':'系統操作服務模式'));
+ if(service?.error)details.push(i18n.t(service.error));
+ if(presence?.online===false)details.push(i18n.t('此 ID 尚未註冊到配對伺服器；已安裝服務不代表連線正常。'));
+ const version=presence?.capabilities?.version;
+ if(managed&&version&&version!==state.info.version)details.push(i18n.t('服務 Host 版本：{0}').replace('{0}',version),i18n.t('服務版本與 APP 不同；手動替換 ZIP 不會更新已安裝的服務副本。'));
+ badge.dataset.tooltip=details.join('\n');
+}
 function renderDevice() {
  $('#stop-incoming').hidden=!state.incomingConnected;
-  const { info, running } = state;
+  const { info } = state;
   const managed=serviceManaged(state.prelogin);
   $('#device-room').textContent = managed && state.prelogin.room ? state.prelogin.room : info.room;
   $('#footer-version').textContent = info.version;
@@ -249,9 +272,7 @@ function renderDevice() {
  $('#local-secret').placeholder=managed?i18n.t('服務模式使用啟用時的密碼'):'';
  $('#toggle-secret').disabled=managed;
   $('#password-reminder').hidden = info.passwordNeedsChange !== 'true' || passwordReminderDismissed;
-  const active = Object.hasOwn(running, 'host');
-  $('#host-status').textContent = managed ? i18n.t(state.prelogin.enabled?'未登入連線服務模式':'系統操作服務模式') : active ? i18n.t('一切就緒') : i18n.t('無法連線');
-  $('.local-badge').dataset.tooltip = `${info.hostname} · ${info.platform} / ${info.architecture}`;
+  renderHostStatus();
 
 }
 function renderLibrary() {
@@ -1054,7 +1075,10 @@ async function checkUpdate(prerelease=false) {
     $('#download-update').hidden = !result.available;
     state.updates=result;renderRelease(result,true);
   } catch (error) { $('#update-status').textContent = i18n.t(error.message); }
-  finally { control.disabled = false; }
+  finally {
+    const value=state?.updates || {};
+    control.disabled=!!(value.notesTest || value.downloading || value.opening || value.installAt || value.local&&value.local.phase!=='failed');
+  }
 }
 $('#check-update').addEventListener('click', () => checkUpdate());
 $('#install-prerelease').addEventListener('click', () => checkUpdate(true));
@@ -1126,9 +1150,13 @@ async function refreshPresence() {
   if (!state || checkingPresence || document.hidden) return;
   checkingPresence = true;
   const requestedAt=Date.now();
-  try { sitePresence = await api('presence'); }
-  catch { sitePresence = {}; }
+  try {
+   const [sites,local]=await Promise.allSettled([api('presence'),api('presence/local')]);
+   sitePresence=sites.status==='fulfilled'?sites.value:{};
+   localPresence=local.status==='fulfilled'?local.value:{room:localPresenceRoom(),online:null};
+  }
   finally { checkingPresence = false; }
+  renderHostStatus();
   for(const [id,recovery] of siteRecovery){
    const site=state.library.sites.find(site=>site.id===id);
    if(Date.now()>=recovery.expires || (requestedAt>=recovery.readyAfter && siteOnline(site)===true))siteRecovery.delete(id);
@@ -1258,12 +1286,117 @@ $('#import-config-file').addEventListener('change', async event => {
 
 // 更新檢查在 Go 常駐程序執行，視窗隱藏時仍依 12 小時週期運作。
 let releaseShown = '';
+let localUpdateUpload = null;
+let localUpdateCancelling = false;
+function renderLocalUpdate(value) {
+ const local=value?.local || (localUpdateUpload&&!localUpdateUpload.id?localUpdateUpload.preview:null);
+ const extension=value?.localExtension || ({windows:'.zip',darwin:'.dmg'}[state?.info?.platform] || '');
+ const otaBusy=value?.downloading || value?.opening || Number(value?.installAt)>0;
+ const localBusy=!!localUpdateUpload || !!local&&local.phase!=='failed';
+ $('#local-update').hidden=!extension;
+ $('#local-update-file').accept=extension;
+ $('#local-update').disabled=!!(otaBusy || localBusy || value?.notesTest);
+ $('#install-prerelease').disabled=!!(otaBusy || localBusy || value?.notesTest);
+ if(!local)return localBusy;
+ if(!$('#local-update-dialog').open&&!document.querySelector('dialog[open]'))openDialog('#local-update-dialog');
+ $('#local-update-name').textContent=local.name;
+ $('#local-update-version').textContent=local.version?`${state?.info?.version || ''} → ${local.version} · ${local.architecture || state?.info?.architecture || ''}`:'';
+ const labels={selected:'正在準備套件…',uploading:'正在準備套件…',validating:'正在驗證更新…',ready:'套件驗證完成，請確認後開始更新。',installing:'正在準備自動安裝…',failed:'本地更新未完成。'};
+ $('#local-update-status').textContent=i18n.t(localUpdateCancelling?'正在取消…':labels[local.phase] || '正在準備套件…');
+ const progress=$('#local-update-progress');
+ progress.hidden=!['selected','uploading','validating','installing'].includes(local.phase);
+ if(['validating','installing'].includes(local.phase))progress.removeAttribute('value');
+ else progress.value=local.size?Math.min(100,Math.floor(Number(local.bytes || 0)/local.size*100)):0;
+ $('#local-update-authorization').hidden=!local.requiresAuthorization;
+ $('#local-update-error').hidden=!local.error;
+ $('#local-update-error').textContent=i18n.t(local.error || '');
+ $('#local-update-install').disabled=local.phase!=='ready' || localUpdateCancelling;
+ $('#local-update-cancel').disabled=local.phase==='installing' || localUpdateCancelling;
+ $('#local-update-close').disabled=local.phase==='installing' || localUpdateCancelling;
+ $('#local-update-cancel').textContent=i18n.t(local.phase==='failed'?'關閉':'取消');
+ return localBusy;
+}
+
+$('#local-update').addEventListener('click',()=>{
+ if(!busy&&!$('#local-update').disabled)$('#local-update-file').click();
+});
+$('#local-update-file').addEventListener('change',async event=>{
+ const file=event.target.files[0];event.target.value='';
+ if(!file || busy || $('#local-update').disabled)return;
+ const extension=$('#local-update-file').accept;
+ if(!file.name.toLowerCase().endsWith(extension) || !extension){toast(i18n.t('請選擇此系統的 YourDesk 更新套件。'),true);return;}
+ if(!file.size || file.size>2*1024*1024*1024){toast(i18n.t('更新套件必須介於 1 byte 與 2 GB。'),true);return;}
+ const run={id:null,cancelled:false,controller:new AbortController(),preview:{name:file.name,size:file.size,phase:'selected'}};
+ localUpdateUpload=run;
+ $('#local-update-error').hidden=true;
+ openDialog('#local-update-dialog');
+ renderRelease(state.updates);
+ try {
+  run.begin=api('updates/local','POST',{name:file.name,size:file.size});
+  const initial=await run.begin;
+  run.id=initial.local.id;
+  if(run.cancelled)return;
+  state.updates=initial;renderRelease(initial);
+  const timeout=setTimeout(()=>run.controller.abort(),10*60*1000);
+  let response;
+  try {
+   response=await fetch(`/api/updates/local?id=${encodeURIComponent(run.id)}`,{method:'PUT',headers:{'X-YourDesk-Token':token,'Content-Type':'application/octet-stream'},body:file,signal:run.controller.signal});
+  } finally {clearTimeout(timeout);}
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error || i18n.t('本地更新未完成。'));
+  if(run.cancelled)return;
+  state.updates=result;
+ } catch(error) {
+  if(run.cancelled)return;
+  try {state.updates=await api('updates/state');}catch{}
+  // 連線在建立工作或傳送檔案途中中斷時，也提供可關閉的結果。
+  const local=state.updates.local;
+  if(!local || local.id===run.id&&local.phase!=='failed'){
+   if(run.id)try{await api('updates/local/cancel','POST',{id:run.id});}catch{}
+   state.updates.local={...run.preview,id:'',phase:'failed',error:error.name==='AbortError'?i18n.t('套件準備逾時，請重新選擇檔案。'):error.message};
+  }
+ } finally {
+  if(localUpdateUpload===run)localUpdateUpload=null;
+  if(!run.cancelled)renderRelease(state.updates);
+ }
+});
+
+async function cancelLocalUpdate(){
+ if(localUpdateCancelling || state?.updates?.local?.phase==='installing')return;
+ localUpdateCancelling=true;
+ const run=localUpdateUpload;
+ if(run){run.cancelled=true;run.controller.abort();}
+ renderRelease(state.updates);
+ try {
+  // 建立工作尚在途中時也等待 ID，確保伺服器端的暫存工作一起取消。
+  if(run?.begin)try{await run.begin;}catch{}
+  const id=run?.id || state?.updates?.local?.id;
+  if(id)state.updates=await api('updates/local/cancel','POST',{id});
+  else if(state?.updates)state.updates.local=null;
+  $('#local-update-dialog').close();
+ }catch(error){if(state?.updates?.local)state.updates.local.error=error.message;toast(error.message,true);}
+ finally{localUpdateCancelling=false;if(localUpdateUpload===run)localUpdateUpload=null;renderRelease(state.updates);}
+}
+$('#local-update-close').addEventListener('click',cancelLocalUpdate);
+$('#local-update-cancel').addEventListener('click',cancelLocalUpdate);
+$('#local-update-dialog').addEventListener('cancel',event=>{event.preventDefault();cancelLocalUpdate();});
+$('#local-update-dialog form').addEventListener('submit',event=>event.preventDefault());
+$('#local-update-install').addEventListener('click',async()=>{
+ const local=state?.updates?.local;
+ if(!local || local.phase!=='ready' || $('#local-update-install').disabled)return;
+ $('#local-update-install').disabled=true;
+ try {state.updates=await api('updates/local/install','POST',{id:local.id});}
+ catch(error){local.error=error.message;toast(error.message,true);}
+ renderRelease(state.updates);
+});
+
 function renderRelease(value, manual=false) {
  if (!value) return;
+ const localBusy=renderLocalUpdate(value);
  // 更新重點是更新完成後的結果；與版本通知同時存在時，優先顯示更新重點。
  const showingNotes=!!(value.showNotes || value.notesTest);
  if (showingNotes) value = {...value, showNotes:true, available:false, installAt:0, downloading:false, opening:false, downloadPath:'', message:'', downloadError:'', openError:''};
- $('#check-update').disabled = !!value.notesTest;
+ $('#check-update').disabled = !!(value.notesTest || localBusy || value.downloading || value.opening || value.installAt);
  const dialog=$('#release-dialog');
  const pending=value.available && value.version!==value.notifiedVersion && value.version!==releaseShown;
  if ((pending || value.showNotes || (manual && value.available)) && !dialog.open && !document.querySelector('dialog[open]')) {
@@ -1307,7 +1440,7 @@ function renderRelease(value, manual=false) {
  $('#release-download').textContent=i18n.t(showingNotes?'確定':label);
  $('#release-download').classList.toggle('danger',!!value.downloadPath && automatic);
  $('#release-download').classList.toggle('primary',!value.downloadPath || !automatic);
- $('#download-update').disabled=busy;
+ $('#download-update').disabled=busy || localBusy;
  $('#download-update').textContent=i18n.t(label);
 }
 async function downloadUpdate() {
@@ -1345,7 +1478,7 @@ window.addEventListener('yourdesk-update',async()=>{
 // 下載期間只輪詢輕量進度 API，不重做 GitHub 更新檢查。
 let releaseProgressPolling=false;
 setInterval(async()=>{
- if(releaseProgressPolling || !state?.updates || !(state.updates.downloading || state.updates.opening || state.updates.installAt))return;
+ if(releaseProgressPolling || !state?.updates || !(localUpdateUpload || state.updates.local?.phase==='selected' || state.updates.local?.phase==='uploading' || state.updates.local?.phase==='validating' || state.updates.local?.phase==='installing' || state.updates.downloading || state.updates.opening || state.updates.installAt))return;
  releaseProgressPolling=true;
  try {const value=await api('updates/state');state.updates=value;renderRelease(value);}catch{}finally{releaseProgressPolling=false;}
 },500);
@@ -1569,8 +1702,16 @@ function renderPrelogin() {
  $('#sas-permission-row').hidden=!service?.sasSupported;
  $('#authorize-sas').checked=sasToggleBusy?sasToggleTarget:ready;
  $('#authorize-sas').disabled=!service?.sasSupported||!!service?.busy||sasToggleBusy;
+ $('#remove-service-row').hidden=!service?.desktopAccessSupported||!serviceManaged(service);
+ $('#remove-system-service').disabled=!!service?.busy;
  // 啟動及背景輪詢只呈現狀態；授權只由使用者手動開啟 Switch 觸發。
 }
+$('#remove-system-service').addEventListener('click',()=>{
+ const service=state?.prelogin;
+ if(busy||!service?.desktopAccessSupported||!serviceManaged(service)||service.busy)return;
+ confirmDelete(i18n.t('移除系統服務'),i18n.t('移除 YourDesk 系統服務？登入前啟動與系統操作授權都會關閉，遠端連線將中斷。接著會要求 Windows 管理員授權；服務故障時也可執行。'),async()=>{await api('prelogin','POST',{remove:true});await updateRunning();});
+ $('#confirm-form button[type="submit"]').textContent=i18n.t('移除');
+});
 $('#ui-desktop-access').addEventListener('change',()=>{
  const toggle=$('#ui-desktop-access'),service=state?.prelogin,enabled=toggle.checked;
  renderPrelogin();

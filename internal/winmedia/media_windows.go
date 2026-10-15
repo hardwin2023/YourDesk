@@ -11,11 +11,15 @@ package winmedia
 import "C"
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"image"
 	"runtime"
-	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
+	"yourdesk/internal/ownedworker"
 )
 
 type result struct {
@@ -25,65 +29,61 @@ type result struct {
 	software     bool
 	err          error
 }
-type operation struct {
-	run  func(*C.yd_media) result
-	done chan result
-}
 type Session struct {
-	mu       sync.Mutex
-	queue    chan operation
-	finished chan struct{}
-	closed   bool
+	worker *ownedworker.Worker[*C.yd_media, result]
 }
 
+// 驅動卡住後不在同一程序反覆建立工作者；既有串流退回軟體處理。
+var nativeStalled atomic.Bool
+
+const operationTimeout = 5 * time.Second
+const closeTimeout = time.Second
+
 func New(mode int) (*Session, error) {
-	s := &Session{queue: make(chan operation), finished: make(chan struct{})}
-	ready := make(chan error, 1)
-	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-		defer close(s.finished)
+	if nativeStalled.Load() {
+		return nil, fmt.Errorf("Windows 原生影音工作者已停滯，本次啟動使用軟體備援")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	defer cancel()
+	w, err := ownedworker.New[*C.yd_media, result](ctx, func() (*C.yd_media, error) {
 		var native *C.yd_media
 		if hr := C.yd_media_open(C.int(mode), &native); hr < 0 {
-			ready <- failure("建立硬體裝置", hr)
-			return
+			return nil, failure("建立硬體裝置", hr)
 		}
-		defer C.yd_media_close(native)
-		ready <- nil
-		for op := range s.queue {
-			op.done <- op.run(native)
+		return native, nil
+	}, func(native *C.yd_media) { C.yd_media_close(native) })
+	if err != nil {
+		if errors.Is(err, ownedworker.ErrStalled) {
+			nativeStalled.Store(true)
 		}
-	}()
-	if err := <-ready; err != nil {
 		return nil, err
 	}
-	return s, nil
+	return &Session{worker: w}, nil
 }
 func failure(action string, hr C.int) error {
 	return fmt.Errorf("Windows %s失敗（HRESULT 0x%08X）：%s", action, uint32(hr), C.GoString(C.yd_media_error()))
 }
 func (s *Session) call(run func(*C.yd_media) result) result {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return result{err: fmt.Errorf("硬體工作階段已關閉")}
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	defer cancel()
+	r, err := s.worker.Call(ctx, run)
+	if err != nil {
+		if errors.Is(err, ownedworker.ErrStalled) {
+			nativeStalled.Store(true)
+		}
+		return result{err: err}
 	}
-	op := operation{run: run, done: make(chan result, 1)}
-	s.queue <- op
-	return <-op.done
+	return r
 }
 func (s *Session) Close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+	if errors.Is(s.worker.Err(), ownedworker.ErrStalled) {
 		return
 	}
-	s.closed = true
-	close(s.queue)
-	<-s.finished
-}
-func validRGBA(src *image.RGBA) bool {
-	return src != nil && !src.Bounds().Empty() && src.Stride >= src.Bounds().Dx()*4 && len(src.Pix) >= (src.Bounds().Dy()-1)*src.Stride+src.Bounds().Dx()*4
+	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+	defer cancel()
+	if err := s.worker.Close(ctx); err != nil {
+		nativeStalled.Store(true)
+	}
 }
 func (s *Session) Encode(src *image.RGBA, bitrate, fps, quality, gop int) ([]byte, []byte, string, error) {
 	return s.EncodeCodec(src, bitrate, fps, quality, gop, 1)
@@ -92,7 +92,9 @@ func (s *Session) EncodeCodec(src *image.RGBA, bitrate, fps, quality, gop, codec
 	if !validRGBA(src) {
 		return nil, nil, "", fmt.Errorf("無效的 RGBA 影格")
 	}
+	src = ownedRGBA(src)
 	r := s.call(func(native *C.yd_media) result {
+		defer releaseOwnedRGBA(src)
 		var out C.yd_media_output
 		defer C.yd_media_free(&out)
 		hr := C.yd_media_encode_format(native, C.int(codec), (*C.uchar)(unsafe.Pointer(&src.Pix[0])), C.int(src.Bounds().Dx()), C.int(src.Bounds().Dy()), C.int(src.Stride), C.int(bitrate), C.int(fps), C.int(quality), C.int(gop), &out)
@@ -112,6 +114,7 @@ func (s *Session) DecodeCodec(data []byte, width, height, codec int) (*image.RGB
 	if len(data) == 0 || len(data) > 32<<20 {
 		return nil, "", false, fmt.Errorf("無效的影片影格")
 	}
+	data = append([]byte(nil), data...)
 	r := s.call(func(native *C.yd_media) result {
 		var out C.yd_media_output
 		defer C.yd_media_free(&out)
@@ -131,14 +134,21 @@ func (s *Session) Scale(src, dst *image.RGBA) (string, error) {
 	if !validRGBA(src) || !validRGBA(dst) {
 		return "", fmt.Errorf("無效的縮圖緩衝")
 	}
+	src = ownedRGBA(src)
+	output := image.NewRGBA(image.Rect(0, 0, dst.Bounds().Dx(), dst.Bounds().Dy()))
 	r := s.call(func(native *C.yd_media) result {
-		hr := C.yd_media_scale(native, (*C.uchar)(unsafe.Pointer(&src.Pix[0])), C.int(src.Bounds().Dx()), C.int(src.Bounds().Dy()), C.int(src.Stride), (*C.uchar)(unsafe.Pointer(&dst.Pix[0])), C.int(dst.Bounds().Dx()), C.int(dst.Bounds().Dy()), C.int(dst.Stride))
+		defer releaseOwnedRGBA(src)
+		hr := C.yd_media_scale(native, (*C.uchar)(unsafe.Pointer(&src.Pix[0])), C.int(src.Bounds().Dx()), C.int(src.Bounds().Dy()), C.int(src.Stride), (*C.uchar)(unsafe.Pointer(&output.Pix[0])), C.int(output.Bounds().Dx()), C.int(output.Bounds().Dy()), C.int(output.Stride))
 		if hr < 0 {
 			return result{err: failure("D3D11 縮圖", hr)}
 		}
-		return result{backend: C.GoString(C.yd_media_backend(native))}
+		return result{backend: C.GoString(C.yd_media_backend(native)), image: output}
 	})
 	runtime.KeepAlive(src)
-	runtime.KeepAlive(dst)
+	if r.err == nil {
+		for y := 0; y < output.Bounds().Dy(); y++ {
+			copy(dst.Pix[y*dst.Stride:y*dst.Stride+output.Stride], output.Pix[y*output.Stride:(y+1)*output.Stride])
+		}
+	}
 	return r.backend, r.err
 }

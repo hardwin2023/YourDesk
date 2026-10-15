@@ -90,10 +90,14 @@ func platformProbe(j job) ([]byte, error) {
 			r["hardwareDecoder"] = nil
 			if err != nil {
 				r["status"] = "unavailable"
+				r["encodeError"] = err.Error()
 			} else {
 				defer enc.Close()
 				data, e := enc.Encode(pixels, 70)
 				r["encodeOK"] = e == nil && len(data) > 0
+				if e != nil {
+					r["encodeError"] = e.Error()
+				}
 				// Windows 正式影片編碼器只選擇硬體 MFT，成功產出才確認硬體可用。
 				if runtime.GOOS == "windows" && e == nil && len(data) > 0 {
 					r["hardwareEncoder"] = true

@@ -50,6 +50,9 @@ type State struct {
 // Managed 與開機連線分開；執行期間授權也由受保護服務維持 Host。
 func (s State) Managed() bool { return s.Installed || s.Enabled }
 
+// Removable 為 Windows 提供獨立移除入口；不依賴開機設定或服務管線仍可回覆。
+func (s State) Removable() bool { return s.DesktopAccessSupported && s.Managed() }
+
 // Handle 在一般 APP／Host 啟動前處理專用服務入口。
 func Handle(ctx context.Context, args []string) (bool, error) {
 	if len(args) < 2 || args[0] != "--prelogin" {

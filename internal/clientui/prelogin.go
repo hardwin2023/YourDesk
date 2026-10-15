@@ -12,11 +12,18 @@ type preloginChange struct {
 	Enabled         bool `json:"enabled"`
 	SecureAttention bool `json:"secureAttention"`
 	DesktopAccess   bool `json:"desktopAccess"`
+	Remove          bool `json:"remove"`
 }
 
 func preloginChangeNeeded(status prelogin.State, request preloginChange) (bool, error) {
 	if !status.Supported {
 		return false, errors.New(status.Message)
+	}
+	if request.Remove {
+		if request.Enabled || request.SecureAttention || request.DesktopAccess || !status.DesktopAccessSupported {
+			return false, errors.New("無效的系統服務移除要求")
+		}
+		return status.Removable(), nil
 	}
 	if request.SecureAttention && (!request.Enabled || !status.SASSupported) {
 		return false, errors.New("無效的 Ctrl+Alt+Del 授權要求")
@@ -115,7 +122,7 @@ func (s *server) handlePrelogin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	s.preloginBusy = true
 	s.preloginMessage = "正在變更系統服務，請完成管理員授權。"
-	if !request.SecureAttention && !request.DesktopAccess && status.RuntimeProtocol == 1 {
+	if !request.SecureAttention && !request.DesktopAccess && !request.Remove && status.RuntimeProtocol == 1 {
 		s.preloginMessage = "正在變更系統服務。"
 	}
 	config := prelogin.Config{Tailcat: s.preferences.TailcatEnabled, Room: s.info["room"], Signal: s.options.Signal, Secret: s.options.Secret, Codec: s.preferences.Codec, CodecGoal: s.preferences.CodecGoal, Direct: s.preferences.DirectListen}
@@ -140,7 +147,9 @@ func (s *server) handlePrelogin(w http.ResponseWriter, r *http.Request) bool {
 			}
 		}
 		if err == nil {
-			if request.SecureAttention {
+			if request.Remove {
+				err = prelogin.RemoveService(ctx)
+			} else if request.SecureAttention {
 				err = prelogin.ConfigureSecureAttention(ctx, config)
 			} else if request.DesktopAccess {
 				err = prelogin.ConfigureDesktopAccess(ctx, request.Enabled, config)

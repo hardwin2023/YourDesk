@@ -369,6 +369,10 @@ func (s *server) api(w http.ResponseWriter, r *http.Request) {
 		s.servePresence(w, r)
 		return
 	}
+	if r.URL.Path == "/api/presence/local" && r.Method == "GET" {
+		s.serveLocalPresence(w, r)
+		return
+	}
 	if r.URL.Path == "/api/incoming/disconnect" && r.Method == "POST" {
 		if err := s.disconnectIncoming(); err != nil {
 			fail(w, err)
@@ -1129,7 +1133,7 @@ func (s *server) keepHostRunning(ctx context.Context) {
 		managed := serviceBusy || state.Managed()
 		s.mu.Unlock()
 		if managed {
-			if !serviceBusy && state.RuntimeProtocol == 1 {
+			if !serviceBusy && state.DesktopAccessSupported && state.Installed {
 				// 管線由 APP context 關閉；不用輪詢心跳，也不在啟動時要求提權。
 				ready := func() {
 					s.mu.Lock()
@@ -1138,9 +1142,13 @@ func (s *server) keepHostRunning(ctx context.Context) {
 						s.notice = ""
 					}
 				}
-				if err := prelogin.HoldDesktopAccess(ctx, ready); err != nil && ctx.Err() == nil {
+				if err := prelogin.HoldDesktopAccess(ctx, ready); errors.Is(err, prelogin.ErrDesktopAccessUnsupported) {
+					ready() // 舊版服務仍維持原有開機 Host；不宣稱已取得新版租約。
+				} else if err != nil && ctx.Err() == nil {
 					s.mu.Lock()
-					s.notice = "系統操作服務尚未就緒，請稍後重試。"
+					if !s.preloginBusy && prelogin.Status().Managed() {
+						s.notice = "系統操作服務尚未就緒，請稍後重試。"
+					}
 					s.mu.Unlock()
 				}
 			}

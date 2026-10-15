@@ -30,6 +30,11 @@ func runWindow(ctx context.Context, address string, connected <-chan struct{}, u
 		return err
 	}
 	defer removeTray()
+	removePicker, err := installFilesPicker(window.Window())
+	if err != nil {
+		return err
+	}
+	defer removePicker()
 	// 固定的外部連結共用系統瀏覽器入口，不依賴 WebView 的新視窗支援。
 	if err := window.Bind("yourdeskOpenExternal", func(url string) error {
 		switch url {

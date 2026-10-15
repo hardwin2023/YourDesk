@@ -22,6 +22,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--green); }
 .brand-caption { font-size: 12px; color: #8a958e; font-weight: 400; letter-spacing: .5px; border-left: 1px solid var(--line); padding-left: 12px; margin-left: 4px; }
 .local-badge { justify-self: end; font-size: 12px; color: #6c8174; display: flex; align-items: center; gap: 6px; }
 .local-badge i, .dot { height: 5px; width: 5px; background: #78a58b; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.local-badge[data-state="offline"] i { background: #b85847; }
+.local-badge[data-state="unknown"] i { background: #98a29c; }
 main { width: 100%; padding: 14px 18px 0; margin: 0 auto; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-shrink: 0; }
 .page-heading .eyebrow, .page-heading .subtle, .version { display: none; }
@@ -274,7 +276,7 @@ dialog select, .preference-row select { appearance: none; -webkit-appearance: no
 .remember-row { display: flex; align-items: center; gap: 8px; }
 dialog .remember-row input { display: inline-block; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--green); }
 
-.settings-about-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 21px 0 5px; }
+.settings-about-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin: 21px 0 5px; }
 .settings-about-heading .settings-about-brand { margin: 0; }
 .settings-about-heading #check-update { flex-shrink: 0; }
 
@@ -413,4 +415,8 @@ dialog .remember-row input { display: inline-block; width: 16px; height: 16px; m
 [data-theme="dark"] .mini-device.connected { color: #69f3a0; background: #17432b; box-shadow: inset 0 0 0 1px #42bf77; }
 [data-theme="dark"] .mini-device.connecting { color: #ffda79; background: #4d3a14; }
 
-.settings-update-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.settings-update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#local-update-name { overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+#local-update-version { font-size: 13px; color: var(--muted); }
+#local-update-progress { display: block; width: 100%; height: 8px; accent-color: var(--green); }
+#local-update-progress[hidden] { display: none; }

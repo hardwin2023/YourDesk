@@ -18,9 +18,23 @@ func detachUpdateHelper(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x00000200}
 }
 func prepareAutomaticUpdate(ctx context.Context, archive, assetURL string) error {
-	portable := strings.HasSuffix(strings.ToLower(archive), "-portable.zip")
+	return prepareWindowsUpdate(ctx, archive, assetURL, false)
+}
+
+func inspectLocalUpdate(ctx context.Context, archive, dir string) (localPackage, error) {
+	info, err := inspectLocalPortable(ctx, archive, dir, runtime.GOARCH)
+	info.RequiresAuthorization = prelogin.Status().Managed()
+	return info, err
+}
+
+func prepareLocalUpdate(ctx context.Context, archive string) error {
+	return prepareWindowsUpdate(ctx, archive, "", true)
+}
+
+func prepareWindowsUpdate(ctx context.Context, archive, assetURL string, local bool) error {
+	portable := strings.HasSuffix(strings.ToLower(archive), "-portable.zip") || (local && strings.EqualFold(filepath.Ext(archive), ".zip"))
 	serviceEnabled := prelogin.Status().Managed()
-	if !portable && !strings.HasSuffix(strings.ToLower(archive), "-setup.exe") {
+	if !portable && (local || !strings.HasSuffix(strings.ToLower(archive), "-setup.exe")) {
 		return fmt.Errorf("此套件不支援自動安裝，請手動開啟下載檔案")
 	}
 	exe, err := os.Executable()
@@ -83,9 +97,14 @@ func prepareAutomaticUpdate(ctx context.Context, archive, assetURL string) error
 	ticket := ""
 	legacy := false
 	if serviceEnabled {
-		ticket, legacy, err = prelogin.PrepareServiceUpdate(ctx, assetURL)
-		if err != nil {
-			return err
+		if local {
+			// 離線套件由使用者明確授權；不能交給僅信任官方 URL 的 SYSTEM 下載器。
+			legacy = true
+		} else {
+			ticket, legacy, err = prelogin.PrepareServiceUpdate(ctx, assetURL)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	helperReady := false
@@ -94,7 +113,7 @@ func prepareAutomaticUpdate(ctx context.Context, archive, assetURL string) error
 			prelogin.CancelServiceUpdate(context.Background(), ticket)
 		}
 	}()
-	config, _ := json.Marshal(map[string]any{"parent": os.Getpid(), "target": target, "files": files, "portable": portable, "prelogin": serviceEnabled, "serviceTicket": ticket})
+	config, _ := json.Marshal(map[string]any{"parent": os.Getpid(), "target": target, "files": files, "portable": portable, "prelogin": serviceEnabled, "serviceTicket": ticket, "offline": local})
 	if err = os.WriteFile(filepath.Join(dir, "config.json"), config, 0600); err != nil {
 		return err
 	}
@@ -125,10 +144,41 @@ $serviceSaved = $false
 $serviceRoot = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'YourDeskPrelogin'
 $serviceBackup = Join-Path $dir 'previous-service'
 $serviceFiles = @('yourdesk-client.exe','avcodec-62.dll','avutil-60.dll','swscale-9.dll')
-$serviceManagedFiles = @($serviceFiles) + @('updater.protocol')
+$serviceProtocolFiles = @('updater.protocol','desktop-control.v1')
+$serviceManagedFiles = @($serviceFiles) + @($serviceProtocolFiles)
 function Start-Prelogin {
  Start-Service YourDeskPrelogin
  (Get-Service YourDeskPrelogin).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
+ if ($config.offline) { Wait-Prelogin }
+}
+function Wait-Prelogin {
+ # status 為舊版也支援的唯讀操作；不要求待回退套件具備新版更新協定。
+ $deadline = [DateTime]::UtcNow.AddSeconds(20)
+ $healthy = 0
+ while ([DateTime]::UtcNow -lt $deadline) {
+  $pipe = New-Object IO.Pipes.NamedPipeClientStream('.','YourDeskPrelogin-control',[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous)
+  $reader = $null; $writer = $null
+  try {
+   $pipe.Connect(1000)
+   $encoding = New-Object Text.UTF8Encoding($false)
+   $reader = New-Object IO.StreamReader($pipe,$encoding,$false,1024,$true)
+   $writer = New-Object IO.StreamWriter($pipe,$encoding,1024,$true)
+   $writer.WriteLine('{"operation":"status"}'); $writer.Flush()
+   $read = $reader.ReadLineAsync()
+   if (-not $read.Wait(1500)) { throw 'Service control pipe timed out.' }
+   $reply = $read.Result | ConvertFrom-Json
+   if ($reply -isnot [bool]) { throw 'Invalid service status reply.' }
+   $healthy++
+   if ($healthy -ge 3) { return }
+  } catch { $healthy = 0 }
+  finally {
+   $pipe.Dispose()
+   if ($null -ne $reader) { try { $reader.Dispose() } catch {} }
+   if ($null -ne $writer) { try { $writer.Dispose() } catch {} }
+  }
+  Start-Sleep -Milliseconds 300
+ }
+ throw 'Updated service control pipe did not become ready.'
 }
 function Stop-Prelogin {
  Stop-Service YourDeskPrelogin
@@ -216,6 +266,14 @@ try {
    Assert-ManagedPath $source
    if (-not (Test-Path -LiteralPath $source)) { throw ('Missing service file: ' + $name) }
    Copy-Item -LiteralPath $source -Destination (Join-Path $serviceRoot $name) -Force
+   if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath (Join-Path $serviceRoot $name) -Algorithm SHA256).Hash) { throw ('Service copy verification failed: ' + $name) }
+  }
+  # 回退時不留下新版標記；支援此協定的 daemon 啟動後會自行重建。
+  if ($config.offline) {
+   foreach ($name in $serviceProtocolFiles) {
+    $marker = Join-Path $serviceRoot $name
+    if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force -ErrorAction Stop }
+   }
   }
   Start-Prelogin
   exit 0
@@ -233,7 +291,7 @@ try {
   try { Restore-ManagedFiles $serviceRoot $serviceBackup $serviceManagedFiles } catch { $_ | Out-String | Add-Content -LiteralPath (Join-Path $dir 'update.log') }
  }
  if ($serviceStopped) { try { Start-Prelogin } catch { $_ | Out-String | Add-Content -LiteralPath (Join-Path $dir 'update.log') } }
- if ($installed -and -not $config.prelogin -and -not $Elevated) {
+ if (-not $Elevated -and ($installed -or ($config.prelogin -and (Test-Path -LiteralPath (Join-Path $dir 'ready')) -and -not (Get-Process -Id $config.parent -ErrorAction SilentlyContinue)))) {
   try { Start-Process -FilePath (Join-Path $config.target 'YourDesk.exe') -WorkingDirectory $config.target -ErrorAction Stop } catch {}
  }
  if ($Elevated -or -not (Test-Path -LiteralPath (Join-Path $dir 'ready'))) { exit 1 }

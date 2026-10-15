@@ -2,17 +2,102 @@ package clientui
 
 import (
 	"context"
+	"debug/macho"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"yourdesk/internal/prelogin"
 )
 
 func detachUpdateHelper(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
+
+func prepareLocalUpdate(ctx context.Context, archive string) error {
+	return prepareAutomaticUpdate(ctx, archive, "")
+}
+
+// 使用與正式安裝相同的唯讀掛載及簽章驗證；不執行套件內的程式。
+func inspectLocalUpdate(ctx context.Context, archive, dir string) (localPackage, error) {
+	source, detach, err := mountUpdateDMG(ctx, archive, dir)
+	if err != nil {
+		return localPackage{}, err
+	}
+	defer detach()
+	if err = verifyMacUpdateBundle(ctx, source); err != nil {
+		return localPackage{}, err
+	}
+	version, err := exec.CommandContext(ctx, "/usr/libexec/PlistBuddy", "-c", "Print :CFBundleGetInfoString", filepath.Join(source, "Contents/Info.plist")).Output()
+	if err != nil || versionKey(strings.TrimSpace(string(version))) == "" {
+		return localPackage{}, fmt.Errorf("更新套件的版本資訊無效。")
+	}
+	return localPackage{Version: strings.TrimSpace(string(version)), RequiresAuthorization: prelogin.Status().Managed()}, nil
+}
+
+func mountUpdateDMG(ctx context.Context, archive, dir string) (string, func(), error) {
+	mount := filepath.Join(dir, "volume")
+	if err := os.Mkdir(mount, 0700); err != nil {
+		return "", nil, err
+	}
+	detach := func() {
+		defer os.Remove(mount)
+		cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := exec.CommandContext(cleanup, "/usr/bin/hdiutil", "detach", mount).Run(); err != nil {
+			exec.CommandContext(cleanup, "/usr/bin/hdiutil", "detach", "-force", mount).Run()
+		}
+	}
+	if out, err := exec.CommandContext(ctx, "/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount, archive).CombinedOutput(); err != nil {
+		detach()
+		return "", nil, fmt.Errorf("無法掛載更新套件：%s", out)
+	}
+	return filepath.Join(mount, "YourDesk.app"), detach, nil
+}
+
+func verifyMacUpdateBundle(ctx context.Context, source string) error {
+	info, err := os.Lstat(source)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("更新套件缺少 YourDesk.app。")
+	}
+	bundleID, err := exec.CommandContext(ctx, "/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", filepath.Join(source, "Contents/Info.plist")).Output()
+	if err != nil || strings.TrimSpace(string(bundleID)) != "com.yourdesk.desktop" {
+		return fmt.Errorf("更新套件的 APP 識別不符")
+	}
+	want := macho.CpuArm64
+	if runtime.GOARCH == "amd64" {
+		want = macho.CpuAmd64
+	}
+	for _, name := range []string{"YourDesk", "yourdesk-client", "yourdesk-remote"} {
+		path := filepath.Join(source, "Contents/MacOS", name)
+		file, err := macho.Open(path)
+		if err == nil {
+			cpu := file.Cpu
+			file.Close()
+			if cpu == want {
+				continue
+			}
+		} else if fat, err := macho.OpenFat(path); err == nil {
+			found := false
+			for _, arch := range fat.Arches {
+				found = found || arch.Cpu == want
+			}
+			fat.Close()
+			if found {
+				continue
+			}
+		}
+		return fmt.Errorf("更新套件的程式架構不符：%s（需要 %s）", name, runtime.GOARCH)
+	}
+	if out, err := exec.CommandContext(ctx, "/usr/bin/codesign", "--verify", "--deep", "--strict", source).CombinedOutput(); err != nil {
+		return fmt.Errorf("新版簽章驗證失敗：%s", out)
+	}
+	return nil
+}
+
 func prepareAutomaticUpdate(ctx context.Context, archive, _ string) error {
 	serviceEnabled := prelogin.Status().Managed()
 	if !strings.EqualFold(filepath.Ext(archive), ".dmg") {
@@ -42,25 +127,17 @@ func prepareAutomaticUpdate(ctx context.Context, archive, _ string) error {
 			os.RemoveAll(stage)
 		}
 	}()
-	mount := filepath.Join(stage, "volume")
-	if err = os.Mkdir(mount, 0700); err != nil {
+	source, detach, err := mountUpdateDMG(ctx, archive, stage)
+	if err != nil {
 		return err
 	}
-	if out, err := exec.CommandContext(ctx, "/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount, archive).CombinedOutput(); err != nil {
-		return fmt.Errorf("無法掛載更新套件：%s", out)
-	}
-	defer exec.Command("/usr/bin/hdiutil", "detach", mount).Run()
-	source := filepath.Join(mount, "YourDesk.app")
-	bundleID, err := exec.CommandContext(ctx, "/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", filepath.Join(source, "Contents/Info.plist")).Output()
-	if err != nil || strings.TrimSpace(string(bundleID)) != "com.yourdesk.desktop" {
-		return fmt.Errorf("更新套件的 APP 識別不符")
-	}
+	defer detach()
 	staged := filepath.Join(stage, "YourDesk.app")
 	if out, err := exec.CommandContext(ctx, "/usr/bin/ditto", source, staged).CombinedOutput(); err != nil {
 		return fmt.Errorf("準備新版失敗：%s", out)
 	}
-	if out, err := exec.CommandContext(ctx, "/usr/bin/codesign", "--verify", "--deep", "--strict", staged).CombinedOutput(); err != nil {
-		return fmt.Errorf("新版簽章驗證失敗：%s", out)
+	if err = verifyMacUpdateBundle(ctx, staged); err != nil {
+		return err
 	}
 	script := filepath.Join(stage, "install.sh")
 	if err = os.WriteFile(script, []byte(macUpdateScript), 0700); err != nil {

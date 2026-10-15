@@ -3,6 +3,7 @@ package p2p
 import (
 	"log/slog"
 	"yourdesk/internal/authlog"
+	"yourdesk/internal/eventqueue"
 )
 
 // 控制事件仍依接收順序執行，確保舊版文字剪貼簿寫入完成後才貼上。
@@ -12,7 +13,7 @@ func (p *Peer) dispatchControl(c Control, handler func(Control)) {
 		return
 	}
 	p.controlDispatchOnce.Do(func() {
-		p.controlInbox = make(chan Control, 128)
+		p.controlInbox = eventqueue.New(128, CanCoalesceMoves)
 		go runControlWorker(p.Done(), p.controlInbox, handler, func() {
 			slog.Error("控制事件處理超過 30 秒，結束停滯連線")
 			authlog.Event("control-worker-stalled", nil)
@@ -26,13 +27,12 @@ func (p *Peer) dispatchControl(c Control, handler func(Control)) {
 		return
 	default:
 	}
-	// 滑鼠移動可略過，預留半數槽位給不可遺失的剪貼簿、按鍵與按鈕。
-	if c.Type == "move" && len(p.controlInbox) >= cap(p.controlInbox)/2 {
-		return
+	// 合併尾端移動；預留半數槽位給不可遺失的剪貼簿、按鍵與按鈕。
+	limit := 0
+	if c.Type == "move" {
+		limit = 64
 	}
-	select {
-	case p.controlInbox <- c:
-	default:
+	if !p.controlInbox.Push(c, limit) && c.Type != "move" {
 		// 不默默遺失按鍵釋放或執行順序；接收回呼不等待失效程序清理。
 		p.controlOverflowOnce.Do(func() {
 			slog.Error("控制事件工作者佇列已滿，結束連線以釋放輸入狀態")

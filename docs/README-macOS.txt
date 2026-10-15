@@ -2,6 +2,8 @@
 --------------------
 登入前啟動：在進階設定開啟「登入前啟動」，預設關閉。macOS 14.4 以上的已簽署 APP 經管理員授權安裝系統服務，登入前即可啟動 Host；須先允許螢幕錄製及輔助使用。此功能仍為實驗性，不支援 FileVault 開機解鎖；關閉時亦需管理員授權。
 
+設定 → 關於 → 本地更新：選擇 YourDesk DMG，可離線升版、同版重裝或回退，不受版本高低限制。驗證後按「開始更新」，自動關閉、同步替換 APP／已安裝服務並重開；保留設定。已安裝登入前服務時需管理員授權。舊版若沒有此按鈕，仍需先手動安裝新版。
+
 DMG 內的 YourDesk.app 拖入 Applications 後啟動，依提示允許螢幕錄製與輔助使用權限。
 接收遠端檔案時，請依提示允許網路卷宗存取。曾拒絕時，到「系統設定 → 隱私權與安全性 → 檔案與檔案夾」允許 YourDesk 存取網路卷宗，再重新複製檔案。
 新增站台並輸入對方 ID，選擇桌面或命令列，再輸入對方密碼。設定 → 網路安全可修改本機密碼。
@@ -18,6 +20,8 @@ CLI：-signal 指定配對伺服器；-print-uid 顯示裝置 ID；-print-secret
 English
 --------------------
 Start before login: enable it in Advanced Settings (off by default). A signed app on macOS 14.4 or later installs the Host system service with administrator approval. Screen Recording and Accessibility permissions are required. This feature is experimental and does not support FileVault startup unlock. Disabling it also requires administrator approval.
+
+Settings → About → Local update: choose a YourDesk DMG to upgrade, reinstall or roll back offline without a version-order restriction. After verification, confirm to close, update the app and installed service, then restart; settings are preserved. An installed pre-login service requires administrator approval. Older versions without this button require a manual upgrade first.
 
 Drag YourDesk.app from the DMG into Applications and launch it. Allow Screen Recording and Accessibility when prompted.
 When receiving remote files, allow Network Volumes access if prompted. If previously denied, enable it for YourDesk in System Settings → Privacy & Security → Files and Folders, then copy the files again.
@@ -36,6 +40,8 @@ Set the password for this run with -secret "your password"; no JSON input is nee
 --------------------
 ログイン前の起動：詳細設定で有効にします（初期設定はオフ）。macOS 14.4 以降の署名済み APP で、管理者の許可により Host システムサービスをインストールします。画面収録とアクセシビリティの許可が必要です。実験的な機能で、FileVault の起動時解除には対応しません。無効化にも管理者の許可が必要です。
 
+設定 → バージョン情報 → ローカル更新：YourDesk DMG でオフライン更新・同版再インストール・旧版への復帰ができます。バージョンの新旧は制限しません。検証後に確認すると APP と既存サービスを更新して再起動し、設定を保持します。ログイン前サービスの更新には管理者承認が必要です。ボタンのない旧版は先に手動更新してください。
+
 DMG の YourDesk.app を Applications にドラッグして起動し、画面収録とアクセシビリティを許可します。
 リモートファイルの受信時はネットワークボリュームへのアクセスを許可してください。以前拒否した場合は「システム設定 → プライバシーとセキュリティ → ファイルとフォルダ」で YourDesk のアクセスを許可し、再度コピーしてください。
 相手の ID を登録し、デスクトップまたはターミナルを選んでパスワードを入力します。本機のパスワードは設定 → ネットワークセキュリティで変更できます。
@@ -52,6 +58,8 @@ CLI：-signal は配対サーバー、-print-uid は装置 ID 表示、-print-se
 한국어
 --------------------
 로그인 전 시작: 고급 설정에서 켜세요(기본값 꺼짐). macOS 14.4 이상의 서명된 APP에서 관리자 승인으로 Host 시스템 서비스를 설치합니다. 화면 기록 및 손쉬운 사용 권한이 필요합니다. 실험적 기능이며 FileVault 부팅 잠금 해제는 지원하지 않습니다. 끌 때도 관리자 승인이 필요합니다.
+
+설정 → 정보 → 로컬 업데이트: YourDesk DMG로 오프라인 업그레이드, 동일 버전 재설치 및 이전 버전 복귀가 가능합니다. 버전 순서는 제한하지 않습니다. 확인 후 앱과 설치된 서비스를 교체하고 다시 시작하며 설정을 유지합니다. 로그인 전 서비스가 설치된 경우 관리자 승인이 필요합니다. 버튼이 없는 구버전은 먼저 수동 업데이트하세요.
 
 DMG의 YourDesk.app을 Applications로 옮겨 실행하고 화면 기록 및 손쉬운 사용 권한을 허용하세요.
 원격 파일을 받을 때 네트워크 볼륨 접근을 허용하세요. 이전에 거부했다면 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더에서 YourDesk의 권한을 허용하고 다시 복사하세요.

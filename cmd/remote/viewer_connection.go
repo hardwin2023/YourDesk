@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"yourdesk/internal/authlog"
 	"yourdesk/internal/clipboard"
 	"yourdesk/internal/p2p"
 	"yourdesk/internal/peertransport"
@@ -51,6 +52,18 @@ func (c *viewerConnection) Close() {
 	})
 }
 
+// 程序結束時可限制等候時間。逾時不釋放仍在使用的資源，清理仍由原
+// 工作者完成；重連則繼續等待 done，避免重用尚未回收的工作階段。
+func (c *viewerConnection) CloseAndWait(ctx context.Context) error {
+	c.Close()
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.Client, g *game, codec string, mode peertransport.Mode, silent bool) (*viewerConnection, error) {
 	ctx, cancel := context.WithCancel(parent)
 	connection := &viewerConnection{signal: sig, clipboard: clipboard.New(), cancel: cancel, ready: make(chan struct{}), done: make(chan struct{})}
@@ -66,6 +79,8 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 	receivedMode := "unknown"
 
 	var stats viewerPipelineStats
+	var load decodeLoad
+	codecRefresh := make(chan struct{}, 1)
 	recovery := newFrameRecovery()
 	var jpegFrames jpegContinuity
 	var lastVideoSequence uint64
@@ -74,13 +89,14 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 		g.mu.RLock()
 		ignore := ctx.Err() != nil || g.agentViewChanging || g.agentPaused || f.ViewID != g.agentViewID
 		g.mu.RUnlock()
-		if ignore {
+		if ignore || load.blocked(f.Codec) {
 			return
 		}
 		decodeStarted := time.Now()
 		defer func() { stats.decodeNanos.Add(uint64(time.Since(decodeStarted))); stats.attempts.Add(1) }()
 		var img image.Image
 		var e error
+		var decodeCost time.Duration
 		if f.Codec == 0 {
 			videoDecoder.Close()
 			lastVideoSequence = 0
@@ -93,7 +109,9 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 				recovery.request()
 				return
 			}
+			started := time.Now()
 			img, e = jpegDecoder.Decode(f.JPEG)
+			decodeCost = time.Since(started)
 		} else {
 			jpegFrames = jpegContinuity{}
 			if lastVideoSequence != 0 && (f.Sequence != lastVideoSequence+1 || int(f.Display) != lastVideoDisplay) {
@@ -102,7 +120,11 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 			}
 			lastVideoSequence = f.Sequence
 			lastVideoDisplay = int(f.Display)
+			started := time.Now()
 			img, e = videoDecoder.Decode(video.WireCodec(f.Codec), f.JPEG)
+			decodeCost = time.Since(started)
+			stats.codecNanos.Add(uint64(decodeCost))
+			stats.codecCalls.Add(1)
 			keyframe, _ := video.IsKeyframe(video.WireCodec(f.Codec), f.JPEG)
 			if errors.Is(e, video.ErrNeedKeyframe) || (e != nil && !keyframe) {
 				stats.waiting.Add(1)
@@ -119,6 +141,10 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 			if e != nil {
 				videoDecodeFailed.Store(true)
 			}
+		}
+		if f.Codec == 0 {
+			stats.codecNanos.Add(uint64(decodeCost))
+			stats.codecCalls.Add(1)
 		}
 		if e != nil {
 			if f.Codec == 0 {
@@ -138,6 +164,17 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 			}
 		} else {
 			mode = videoDecoder.DecodingMode()
+		}
+		stats.decodeMode.Store(map[string]uint32{"software": 1, "hardware": 2}[mode])
+		if load.observe(f.Codec, mode, decodeCost) {
+			stats.overloads.Add(1)
+			authlog.Event("viewer-codec-overload", map[string]any{"codec": f.Codec, "decodeMode": mode, "decodeMs": decodeCost.Milliseconds()})
+			slog.Warn("遠端顯示 持續解碼過慢且佇列滿載，本次連線切換其他編碼", "codec", f.Codec, "mode", mode, "decodeMs", decodeCost.Milliseconds())
+			recovery.request()
+			select {
+			case codecRefresh <- struct{}{}:
+			default:
+			}
 		}
 		codecStatusMu.Lock()
 		receivedWire = f.Codec
@@ -180,10 +217,15 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 	peer, err := p2p.NewViewerWithTransport(handshakeCtx, sig, mode, func(f p2p.Frame) {
 		stats.received.Add(1)
 		stats.wire.Store(uint32(f.Codec))
+		if load.blocked(f.Codec) {
+			return
+		}
 		// 封包已重組為獨立記憶體，交給解碼 worker 後即可接收下一幀。
 		// 網路回呼不可等待解碼 worker；滿載時略過影格，讓
 		// DataChannel read loop 持續消費 SCTP。
 		if !recovery.submit(f, decodeFrames.TrySubmit) {
+			stats.queueDrops.Add(1)
+			load.dropped(f.Codec)
 			slog.Debug("遠端顯示 解碼佇列滿載，略過影格")
 		}
 	}, func(c p2p.Control) {
@@ -296,6 +338,7 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 			if videoDecodeFailed.Load() {
 				advertised = nil
 			}
+			advertised = load.available(advertised)
 			_ = peer.SendControl(p2p.Control{Type: "video-capabilities", Codecs: advertised, HardwareDecodeCodecs: video.ReceiverHardwareCodecs(advertised), KeyframeInterval: 10})
 			select {
 			case <-ctx.Done():
@@ -303,6 +346,7 @@ func openViewerConnection(parent, handshakeCtx context.Context, sig *signaling.C
 			case <-peer.Done():
 				return
 			case <-ticker.C:
+			case <-codecRefresh:
 			}
 		}
 	}()
