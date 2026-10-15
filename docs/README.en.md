@@ -88,6 +88,8 @@ This workflow is for the macOS / Windows desktop clients, not Android / iOS. See
 
 ## More information
 
+[Streaming overload and shutdown on Windows, macOS and Android](STREAMING-RECOVERY.md) describes the recovery paths and validation limits.
+
 [File transfer](FILE-TRANSFER.md) · [Streaming settings](STREAMING-CONTROLS.md) · [Build guide](BUILD.md) · [Architecture](ARCHITECTURE.md) · [Enhancement models](QUICKSRNET.md) · [Interpolation](FRAME-INTERPOLATION.md)
 
 Thanks to the authors of FSR, QuickSRNet/SESR and RIFE. Full [FSR](FSR-LICENSE.txt), [super-resolution](../internal/superres/MODEL_LICENSE.txt) and [RIFE](../internal/frameinterp/MODEL_LICENSE.txt) licenses are included with the packages.

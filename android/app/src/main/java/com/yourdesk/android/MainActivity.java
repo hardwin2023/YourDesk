@@ -60,7 +60,7 @@ import com.yourdesk.androidcore.core.TerminalSession;
 import com.yourdesk.androidcore.core.Viewer;
 import com.yourdesk.android.video.DecoderSupport;
 import com.yourdesk.android.video.EncodedVideoFrame;
-import com.yourdesk.android.video.MediaCodecVideoDecoder;
+import com.yourdesk.android.video.AsyncVideoDecoder;
 import com.yourdesk.android.audio.RemoteAudioPlayer;
 import com.yourdesk.android.audio.RemoteAudioSession;
 import com.yourdesk.android.update.AppUpdater;
@@ -72,7 +72,7 @@ public final class MainActivity extends ComponentActivity {
   private DeltaImageView nativeScreen;
   private TextureView nativeVideo;
   private Surface videoSurface;
-  private final MediaCodecVideoDecoder videoDecoder = new MediaCodecVideoDecoder();
+  private final AsyncVideoDecoder videoDecoder = new AsyncVideoDecoder();
   private EncodedVideoFrame pendingVideoFrame;
   private int videoWidth;
   private int videoHeight;
@@ -337,7 +337,7 @@ public final class MainActivity extends ComponentActivity {
     nativeVideo.setOpaque(false);
     nativeVideo.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
       @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture texture, int width, int height) {
-        if (videoSurface != null) videoSurface.release();
+        if (videoSurface != null) { Surface old = videoSurface; videoDecoder.resetAfter(old::release); }
         videoSurface = new Surface(texture);
         if (pendingVideoFrame != null) presentVideoFrame(pendingVideoFrame);
         if (videoMode && videoDecoder.needsKeyframe()) requestVideoKeyframe();
@@ -348,15 +348,13 @@ public final class MainActivity extends ComponentActivity {
       }
 
       @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture texture) {
-        videoDecoder.reset();
+        Surface old = videoSurface;
+        videoSurface = null;
+        videoDecoder.resetAfter(() -> { try { if (old != null) old.release(); } finally { texture.release(); } });
         if (videoMode) { displayFrameReady = false; updateDisplayInputGate(); }
         videoKeyframeRequested = false;
         lastKeyframeRequestMs = 0;
-        if (videoSurface != null) {
-          videoSurface.release();
-          videoSurface = null;
-        }
-        return true;
+        return false;
       }
 
       @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture texture) { }
@@ -710,7 +708,14 @@ public final class MainActivity extends ComponentActivity {
 
   private int drainVideoFrames() {
     int rendered = videoDecoder.drainOutput();
-    if (rendered > 0) markDisplayFramePresented();
+    if (rendered > 0) {
+      markDisplayFramePresented();
+      videoKeyframeRequested = false;
+      if (web != null) {
+        String label = videoDecoder.wireCodec() == 1 ? "H.264" : "HEVC";
+        web.evaluateJavascript("window.desktopFrameStatus&&window.desktopFrameStatus(" + videoWidth + "," + videoHeight + ",false,'" + label + "'," + viewportDisplay + ")", null);
+      }
+    }
     return rendered;
   }
 
@@ -1047,6 +1052,7 @@ public final class MainActivity extends ComponentActivity {
     if (scaleButton != null) scaleButton.setText("\uf390  " + selectedScale);
     videoSequence = 0;
     videoDecoder.resetSession();
+    disabledVideoCodecs = videoDecoder.failedCodecMask();
     if (nativeVideo != null) nativeVideo.setVisibility(View.GONE);
   }
 
@@ -1117,9 +1123,9 @@ public final class MainActivity extends ComponentActivity {
   }
 
   private void withdrawFailedVideoCodec() {
-    int failed = videoDecoder.failedWireCodec();
-    if (failed <= 0 || (disabledVideoCodecs & (1 << failed)) != 0) return;
-    disabledVideoCodecs |= 1 << failed;
+    int failed = videoDecoder.failedCodecMask();
+    if ((failed & ~disabledVideoCodecs) == 0) return;
+    disabledVideoCodecs |= failed;
     pendingVideoFrame = null;
     capabilityUpdatePending = true;
     sendPendingVideoCapabilities();
@@ -1211,6 +1217,7 @@ public final class MainActivity extends ComponentActivity {
         sendPendingVideoCapabilities();
         if (session.consumeFrameRecoveryRequest()) {
           jpegPolicy.invalidate();
+          videoDecoder.noteDroppedFrame();
           videoDecoder.reset();
           requestVideoKeyframe();
         }
@@ -1950,6 +1957,7 @@ public final class MainActivity extends ComponentActivity {
     if (fullscreenExitGesture != null) fullscreenExitGesture.reset();
     generation++;
     clearComposedFrame();
+    videoDecoder.close();
     remoteAudio.close();
     unregisterReceiver(audioNoisyReceiver);
     new Thread(viewer::close).start();

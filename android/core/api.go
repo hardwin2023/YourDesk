@@ -25,6 +25,7 @@ type Viewer struct {
 	mu         sync.Mutex
 	generation uint64
 	peer       *p2p.Peer
+	input      *inputSender
 	cancel     context.CancelFunc
 	onFrame    func(FrameInfo)
 	onState    func(string)
@@ -118,6 +119,7 @@ func (v *Viewer) Connect(url, room, secret string) error {
 		return context.Canceled
 	}
 	v.peer = p
+	v.input = newInputSender(ctx, p.SendControl)
 	v.mu.Unlock()
 	go func() {
 		select {
@@ -138,6 +140,7 @@ func (v *Viewer) beginConnect() (context.Context, context.CancelFunc, uint64) {
 	v.generation++
 	generation := v.generation
 	v.peer, v.cancel = nil, cancel
+	v.input = nil
 	v.resetStreamLocked()
 	v.resetDisplaysLocked()
 	v.frameMu.Lock()
@@ -159,6 +162,7 @@ func (v *Viewer) Close() {
 	p, c := v.peer, v.cancel
 	v.generation++
 	v.peer = nil
+	v.input = nil
 	v.cancel = nil
 	v.resetStreamLocked()
 	v.resetDisplaysLocked()
@@ -177,8 +181,9 @@ func (v *Viewer) Close() {
 func (v *Viewer) Terminal() *TerminalSession { return &TerminalSession{viewer: v} }
 
 const (
-	maxQueuedFrames     = 512
-	maxQueuedFrameBytes = 32 * 1024 * 1024
+	maxQueuedFrames      = 512
+	maxQueuedVideoFrames = 2
+	maxQueuedFrameBytes  = 32 * 1024 * 1024
 )
 
 func (v *Viewer) resetFramesLocked(generation uint64) {
@@ -205,7 +210,11 @@ func (v *Viewer) enqueueSessionFrame(f p2p.Frame, generation uint64) {
 		v.frameMu.Unlock()
 		return
 	}
-	if len(f.JPEG) == 0 || len(f.JPEG) > maxQueuedFrameBytes || v.frameCount >= maxQueuedFrames || v.frameBytes > maxQueuedFrameBytes-len(f.JPEG) {
+	limit := maxQueuedFrames // JPEG 仍須保留同一桌面的多個相依區塊。
+	if f.Codec != 0 {
+		limit = maxQueuedVideoFrames
+	}
+	if len(f.JPEG) == 0 || len(f.JPEG) > maxQueuedFrameBytes || v.frameCount >= limit || v.frameBytes > maxQueuedFrameBytes-len(f.JPEG) {
 		v.frames = nil
 		v.frameHead = 0
 		v.frameCount = 0
@@ -446,6 +455,7 @@ func (v *Viewer) SendControlJSON(payload string) error {
 	}
 	v.mu.Lock()
 	p := v.peer
+	input := v.input
 	v.mu.Unlock()
 	if p == nil {
 		return fmt.Errorf("遠端尚未連線")
@@ -457,5 +467,8 @@ func (v *Viewer) SendControlJSON(payload string) error {
 	if c.Type == "text" && (len(c.Text) == 0 || len(c.Text) > 16*1024 || !utf8.ValidString(c.Text)) {
 		return fmt.Errorf("輸入文字不是有效 UTF-8 或超過 16 KiB")
 	}
-	return p.SendControl(c)
+	if input == nil {
+		return fmt.Errorf("操作連線尚未就緒")
+	}
+	return input.enqueue(c)
 }

@@ -91,6 +91,7 @@ macOS 使用遠端桌面時需允許「螢幕錄製」與「輔助使用」權�
 
 - [連線測速與分析](docs/CONNECTION-DIAGNOSTICS.md) · [串流設定與相容性](docs/STREAMING-CONTROLS.md)
 - [本地離線更新與回退](docs/LOCAL-UPDATE.md) · [Windows 卡頓與驗證紀錄](docs/WINDOWS-IDLE-INPUT.md)
+- [Windows／macOS／Android 串流過載與安全退出](docs/STREAMING-RECOVERY.md)
 - [桌面檔案傳輸](docs/FILE-TRANSFER.md) · [遠端命令列](docs/TERMINAL.md)
 - [建置與打包](docs/BUILD.md) · [架構說明](docs/ARCHITECTURE.md)
 - [Android Viewer 發行、簽章與測試](docs/ANDROID-BUILD.md) · [記憶體最佳化紀錄](docs/MEMORY-OPTIMIZATION-2026-09-19.md)

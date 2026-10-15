@@ -1,6 +1,8 @@
 # Android 建置、簽章與驗證
 
-更新於 2026-10-03。Android Viewer 位於 `android/`，使用獨立 Go module；桌面版的編譯不能代替 Android core、APK 與手機驗證。
+更新於 2026-10-15。Android Viewer 位於 `android/`，使用獨立 Go module；桌面版的編譯不能代替 Android core、APK 與手機驗證。
+
+2026-10-15 原始碼更新：MediaCodec 改由背景工作者處理，加入影片雙槽、持續過載協商與原生逾時退役；Surface 隨原生擁有者停止後回收，鍵鼠傳送亦改走有界背景佇列。macOS／Windows 對應路徑與完整驗證限制見[串流過載與安全退出](STREAMING-RECOVERY.md)。Android Go／race、JVM／前端 Smoke、AAR、Release lint 與 Debug／Release APK 建置通過，本輪未連接 Android 實機，尚未另行發布新套件。
 
 一般使用者可下載 [Android 1.26.1003 build 2028](https://github.com/VaderChen/YourDesk/releases/tag/1.26.1003-build-2028)；本次與桌面版合併發行，安裝方式與驗證範圍見[發行說明](RELEASE-1.26.1003-build-2028.md)。本版首次提供自動更新器，舊版使用者須先手動安裝一次；後續會自動偵測與下載，由 Android 確認安裝。既有功能與歷史實機結果見 [Android 功能紀錄](ANDROID-RELEASE-2026-10-01.md)。
 

@@ -13,10 +13,13 @@ import (
 	"image"
 	"image/draw"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 	"yourdesk/internal/optimization"
 	_ "yourdesk/internal/pixelconv" // 將共用原生標頭納入 Go 建置相依性。
 )
+
+var macEncoderStalled, macDecoderStalled [4]atomic.Bool
 
 type nativeIntraEncoder struct {
 	mu                         sync.Mutex
@@ -33,6 +36,8 @@ type nativeIntraEncoder struct {
 	appliedBitrate, appliedFPS int
 }
 
+func (e *nativeIntraEncoder) Backend() string { return "VideoToolbox 硬體編碼" }
+
 func NewIntraEncoder(codec Codec) (IntraEncoder, error) {
 	if codec == CodecSoftwareAV1 {
 		return newSoftwareAV1Encoder()
@@ -48,7 +53,9 @@ func NewIntraEncoder(codec Codec) (IntraEncoder, error) {
 	default:
 		return nil, ErrVideoUnavailable
 	}
-	return &nativeIntraEncoder{codec: kind, gop: 1}, nil
+	return boundEncoder(&macEncoderStalled[WireForCodec(codec)], func() (IntraEncoder, error) {
+		return &nativeIntraEncoder{codec: kind, gop: 1}, nil
+	})
 }
 func (e *nativeIntraEncoder) SetKeyframeInterval(n int) {
 	e.mu.Lock()
@@ -195,10 +202,15 @@ func (d *platformDecoder) SetDecodePolicy(p optimization.Policy) {
 }
 
 func newIntraDecoder(codec WireCodec) (IntraDecoder, error) {
-	if codec == WireAV1 {
-		return &macAV1Decoder{}, nil
+	if codec != WireH264 && codec != WireHEVC && codec != WireAV1 {
+		return nil, ErrVideoUnavailable
 	}
-	return &platformDecoder{codec: codec}, nil
+	return boundDecoder(&macDecoderStalled[codec], func() (IntraDecoder, error) {
+		if codec == WireAV1 {
+			return &macAV1Decoder{}, nil
+		}
+		return &platformDecoder{codec: codec}, nil
+	})
 }
 func (d *platformDecoder) Close() error         { C.yd_decoder_close(&d.native); return nil }
 func (d *platformDecoder) Backend() string      { return "VideoToolbox / " + d.mode }

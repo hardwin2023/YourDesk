@@ -24,6 +24,8 @@
 
 ## 原始碼同步與驗證紀錄（2026-10-15）
 
+本輪再將[串流過載與安全退出](STREAMING-RECOVERY.md)套用至 macOS／Android：macOS VideoToolbox 編解碼加入原生工作者期限；Android MediaCodec 改走有界背景交接、逾時退役與延後 Surface 釋放，Go 核心補上影片雙槽及有序輸入。macOS 實際影音 Smoke／Client／Remote 建置、Android Go／race、JVM／前端 Smoke、AAR／APK 對齊、Release lint 及 Debug／Release APK 編譯通過；未連接 Android 實機，也未建立新 Release。
+
 本次同步包含 Windows 系統服務移除與租約相容性、HEVC 正式硬體路徑、鍵鼠有序佇列、實際 Host 連線狀態、本地離線更新與回退，以及解碼過載／原生等待／控制端結束處理。
 
 - Go／race Smoke 已涵蓋本地更新、服務交接與相容性、輸入順序與取消、雙槽解碼過載、原生工作者逾時及資源所有權。

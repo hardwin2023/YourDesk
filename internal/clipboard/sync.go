@@ -17,6 +17,9 @@ type keyJob struct {
 	generation uint64
 	paste      bool
 	reset      bool
+	batch      []p2p.Control
+	result     chan error
+	context    context.Context
 	control    p2p.Control
 }
 type Sync struct {
@@ -36,6 +39,7 @@ type Sync struct {
 	generation        uint64
 	pasteCancel       context.CancelCauseFunc
 	inputInFlight     bool
+	inputEpoch        chan struct{}
 	held              map[string]p2p.Control
 	remote            atomic.Bool
 	legacyRemote      atomic.Bool
@@ -174,6 +178,10 @@ func (s *Sync) resetKeysLocked(reason string, force bool) {
 		return
 	}
 	s.generation++
+	if s.inputEpoch != nil {
+		close(s.inputEpoch)
+		s.inputEpoch = nil
+	}
 	if s.pasteCancel != nil {
 		s.pasteCancel(errors.New(reason))
 		s.pasteCancel = nil
@@ -229,6 +237,19 @@ func (s *Sync) keyboardWithSender(ctx context.Context, send func(p2p.Control) er
 		if generation != job.generation {
 			dropPaste = false
 			generation = job.generation
+		}
+		if job.batch != nil {
+			s.inputInFlight = true
+			s.mu.Unlock()
+			err := s.sendInputBatch(ctx, job, send)
+			s.mu.Lock()
+			job.result <- err
+			if err != nil {
+				s.resetKeysLocked("批次輸入取消或失敗", true)
+			}
+			s.inputInFlight = false
+			s.mu.Unlock()
+			continue
 		}
 		if job.reset {
 			releases := make([]p2p.Control, 0, len(s.held)+1)
@@ -296,26 +317,55 @@ func (s *Sync) keyboardWithSender(ctx context.Context, send func(p2p.Control) er
 		s.mu.Lock()
 		s.inputInFlight = false
 		if err == nil {
-			id := c.Key
-			if c.RawKey != nil {
-				id = fmt.Sprintf("%s/%d", c.RawKey.Platform, c.RawKey.Code)
-			}
-			if c.Type == "button" {
-				id = fmt.Sprintf("mouse/%d", c.Button)
-			}
-			if c.Type == "key" || c.Type == "raw-key" || c.Type == "button" {
-				if down {
-					if s.held == nil {
-						s.held = make(map[string]p2p.Control)
-					}
-					s.held[id] = c
-				} else {
-					delete(s.held, id)
-				}
-			}
+			s.rememberControlLocked(c)
 		} else if ctx.Err() == nil {
 			slog.Debug("鍵盤傳送失敗", "error", err)
 		}
 		s.mu.Unlock()
 	}
+}
+
+func (s *Sync) rememberControlLocked(c p2p.Control) {
+	id, down := c.Key, c.Down
+	if c.RawKey != nil {
+		id = fmt.Sprintf("%s/%d", c.RawKey.Platform, c.RawKey.Code)
+		down = c.RawKey.Down
+	}
+	if c.Type == "button" {
+		id = fmt.Sprintf("mouse/%d", c.Button)
+	}
+	if c.Type == "key" || c.Type == "raw-key" || c.Type == "button" {
+		if down {
+			if s.held == nil {
+				s.held = make(map[string]p2p.Control)
+			}
+			s.held[id] = c
+		} else {
+			delete(s.held, id)
+		}
+	}
+}
+
+func (s *Sync) sendInputBatch(ctx context.Context, job keyJob, send func(p2p.Control) error) error {
+	for _, c := range job.batch {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := job.context.Err(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		current := job.generation == s.generation
+		s.mu.Unlock()
+		if !current {
+			return context.Canceled
+		}
+		if err := send(c); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.rememberControlLocked(c)
+		s.mu.Unlock()
+	}
+	return nil
 }

@@ -19,6 +19,8 @@ done < <(find android/app/src/testHost/java -type f -name '*.java' ! -name '._*'
   "${video_test_sources[@]}" \
   android/app/src/main/java/com/yourdesk/android/video/EncodedVideoFrame.java \
   android/app/src/main/java/com/yourdesk/android/video/DecoderSupport.java \
+  android/app/src/main/java/com/yourdesk/android/video/AsyncVideoDecoder.java \
   android/app/src/main/java/com/yourdesk/android/video/MediaCodecVideoDecoder.java
 "$video_java" -Xmx128m -cp "$video_test_build" com.yourdesk.android.video.VideoDecoderHostTest \
   android/app/src/androidTest/assets/fullscreen-h264-1080.bin
+"$video_java" -Xmx128m -cp "$video_test_build" com.yourdesk.android.video.AsyncVideoDecoderHostTest

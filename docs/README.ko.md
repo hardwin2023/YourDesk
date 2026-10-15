@@ -87,6 +87,8 @@ macOS에서 원격 데스크톱을 제어하려면 화면 기록과 손쉬운 �
 
 ## 자세한 정보
 
+Windows / macOS / Android의 [스트리밍 과부하 및 종료 처리](STREAMING-RECOVERY.md)에서 복구 경로와 검증 제한을 확인할 수 있습니다.
+
 [파일 전송](FILE-TRANSFER.md) · [스트리밍 설정](STREAMING-CONTROLS.md) · [빌드](BUILD.md) · [구조](ARCHITECTURE.md) · [모델](QUICKSRNET.md) · [보간](FRAME-INTERPOLATION.md)
 
 FSR, QuickSRNet/SESR, RIFE 제작자에게 감사드립니다. [FSR](FSR-LICENSE.txt), [초해상도 모델](../internal/superres/MODEL_LICENSE.txt), [RIFE](../internal/frameinterp/MODEL_LICENSE.txt)의 전체 라이선스는 배포 패키지에도 포함됩니다.
