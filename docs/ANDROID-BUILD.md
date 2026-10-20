@@ -1,18 +1,18 @@
 # Android 建置、簽章與驗證
 
-更新於 2026-10-15。Android Viewer 位於 `android/`，使用獨立 Go module；桌面版的編譯不能代替 Android core、APK 與手機驗證。
+更新於 2026-10-20。Android Viewer 位於 `android/`，使用獨立 Go module；桌面版的編譯不能代替 Android core、APK 與手機驗證。
 
-2026-10-15 原始碼更新：MediaCodec 改由背景工作者處理，加入影片雙槽、持續過載協商與原生逾時退役；Surface 隨原生擁有者停止後回收，鍵鼠傳送亦改走有界背景佇列。macOS／Windows 對應路徑與完整驗證限制見[串流過載與安全退出](STREAMING-RECOVERY.md)。Android Go／race、JVM／前端 Smoke、AAR、Release lint 與 Debug／Release APK 建置通過，本輪未連接 Android 實機，尚未另行發布新套件。
+2026-10-15 原始碼更新：MediaCodec 改由背景工作者處理，加入影片雙槽、持續過載協商與原生逾時退役；Surface 隨原生擁有者停止後回收，鍵鼠傳送亦改走有界背景佇列。macOS／Windows 對應路徑與完整驗證限制見[串流過載與安全退出](STREAMING-RECOVERY.md)。10 月 20 日另以 ASUS／Android 11 實機補驗，修正初始化與缺幀恢復、快速直連重連問題；證據與測試範圍見 [Android 實機紀錄](ANDROID-DEVICE-2026-10-20.md)。修正已納入 [1.26.1020 build 1252](RELEASE-1.26.1020-build-1252.md)。
 
-一般使用者可下載 [Android 1.26.1003 build 2028](https://github.com/VaderChen/YourDesk/releases/tag/1.26.1003-build-2028)；本次與桌面版合併發行，安裝方式與驗證範圍見[發行說明](RELEASE-1.26.1003-build-2028.md)。本版首次提供自動更新器，舊版使用者須先手動安裝一次；後續會自動偵測與下載，由 Android 確認安裝。既有功能與歷史實機結果見 [Android 功能紀錄](ANDROID-RELEASE-2026-10-01.md)。
+一般使用者可下載 [Android 1.26.1020 build 1252](https://github.com/VaderChen/YourDesk/releases/tag/1.26.1020-build-1252)；本次與桌面版合併發行，安裝方式與驗證範圍見[發行說明](RELEASE-1.26.1020-build-1252.md)。自動更新器自 1.26.1003 build 2028 起提供；更早的版本須先手動安裝一次，後續自動偵測與下載，仍由 Android 確認安裝。既有功能與歷史實機結果見 [Android 功能紀錄](ANDROID-RELEASE-2026-10-01.md)。
 
-本版提供 [APK 自動更新](ANDROID-UPDATES.md)：首頁閒置時偵測並下載正式新版，完成驗證後交由 Android 確認安裝。舊 APK 尚未包含此功能，第一次須手動安裝本版。
+本版提供 [APK 自動更新](ANDROID-UPDATES.md)：首頁閒置時偵測並下載正式新版，完成驗證後交由 Android 確認安裝。1.26.1003 build 2028 以前的 APK 尚未包含此功能，第一次須手動安裝。
 
 ## 發行範圍
 
 本版提供 Android 8.0 以上的 arm64 手機 APK，支援遠端桌面、右鍵／遠端捲動、多螢幕切換、遠端聲音、Shell、站台新增／編輯／刪除、加密記憶密碼及 QR 匯入。影像使用 JPEG 與 MediaCodec H.264／HEVC，聲音使用系統 Opus／AAC 解碼與 AudioTrack，並支援 PCM。剪貼簿同步尚未實作；AV1、獨立檔案傳輸與 FFmpeg 軟解碼不在本版範圍。相機為選用功能，沒有相機仍可手動新增站台。
 
-- 版本由 `android/version.properties` 統一管理：`1.26.1003 build 2028`、versionCode `29850508`。每次正式更新必須遞增 versionCode。
+- 版本由 `android/version.properties` 統一管理：`1.26.1020 build 1252`、versionCode `29874532`。每次正式更新必須遞增 versionCode。
 - 正式套件為 `com.yourdesk.android`；Debug 使用 `com.yourdesk.android.debug`，實機測試不覆蓋正式資料。
 - 站台與密碼更新使用一次儲存交易。密碼由 Android Keystore／AES-GCM 保護，依「信令伺服器＋遠端 ID」隔離；刪除站台會清除對應密碼。編輯時留白保留密碼，另有明確的清除選項。
 - QR 僅接受 YourDesk v1 白名單欄位，拒絕密碼、重複欄位與不安全信令位址；掃描後必須確認再儲存。相機拒絕、取消、背景切換均能返回手動操作。
@@ -73,19 +73,19 @@
 
 ```sh
 python3 scripts/android_release.py build
-python3 scripts/android_release.py verify --apk dist/android/YourDesk-1.26.1003-build-2028-android-arm64.apk
-python3 scripts/android_release.py verify-zip --zip dist/android/YourDesk-1.26.1003-build-2028-android-arm64.zip
+python3 scripts/android_release.py verify --apk dist/android/YourDesk-1.26.1020-build-1252-android-arm64.apk
+python3 scripts/android_release.py verify-zip --zip dist/android/YourDesk-1.26.1020-build-1252-android-arm64.zip
 ```
 
 腳本依序驗證或重建 Go core／CameraX JNI，執行 Wrapper 的 `lintRelease`、`assembleRelease`，以 16 KB ZIP 對齊後簽章，再核對版本、非偵錯狀態、ABI、所有原生 ELF、ZIP 與 v2／v3 簽章。成品驗證成功才替換目標檔，再使用固定檔案清單與 Deflate 壓縮封裝 ZIP，內含原版簽章 APK、四語安裝說明、四語授權文件、BUILD.json 與 SHA256SUMS。每個檔案逐一核對 SHA-256；固定時間與權限使相同輸入產生相同 ZIP。封裝不重簽 APK。
 
 ```text
-dist/android/YourDesk-1.26.1003-build-2028-android-arm64.apk
-dist/android/YourDesk-1.26.1003-build-2028-android-arm64.sha256
-dist/android/YourDesk-1.26.1003-build-2028-android-arm64.json
-dist/android/YourDesk-1.26.1003-build-2028-android-arm64.zip
-dist/android/YourDesk-1.26.1003-build-2028-android-arm64.zip.sha256
-dist/android/YourDesk-1.26.1003-build-2028-android-arm64.zip.json
+dist/android/YourDesk-1.26.1020-build-1252-android-arm64.apk
+dist/android/YourDesk-1.26.1020-build-1252-android-arm64.sha256
+dist/android/YourDesk-1.26.1020-build-1252-android-arm64.json
+dist/android/YourDesk-1.26.1020-build-1252-android-arm64.zip
+dist/android/YourDesk-1.26.1020-build-1252-android-arm64.zip.sha256
+dist/android/YourDesk-1.26.1020-build-1252-android-arm64.zip.json
 ```
 
 GitHub Release 僅上傳 `.zip`、`.zip.sha256`、`.zip.json` 三個檔案。APK 與其原始建置紀錄保留在本機；ZIP 的 JSON 另記錄 `archive.sha256`、大小及逐檔雜湊，頂層 `sha256` 仍為 APK。
@@ -93,8 +93,8 @@ GitHub Release 僅上傳 `.zip`、`.zip.sha256`、`.zip.json` 三個檔案。APK
 已有通過驗證的正式 APK 時，可直接封裝並檢查：
 
 ```sh
-python3 scripts/android_release.py pack --apk dist/android/YourDesk-1.26.1003-build-2028-android-arm64.apk
-python3 scripts/android_release.py verify-zip --zip dist/android/YourDesk-1.26.1003-build-2028-android-arm64.zip
+python3 scripts/android_release.py pack --apk dist/android/YourDesk-1.26.1020-build-1252-android-arm64.apk
+python3 scripts/android_release.py verify-zip --zip dist/android/YourDesk-1.26.1020-build-1252-android-arm64.zip
 ```
 
 `pack` 會重新驗證 APK 簽章並比對旁邊的 `.json` 建置紀錄；若發行時另有補上來源提交資訊的紀錄，可用 `--record <檔案>` 指定，仍須與 APK 的版本、ABI、雜湊及憑證一致。
@@ -138,7 +138,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p test_androi
 android/gradlew -p android :app:connectedDebugAndroidTest
 ```
 
-手機需解鎖，且允許測試使用相機。裝置測試使用獨立 Debug 套件與自己的站台資料。一般裝置測試有 31 項，包含縮放／拖移、工具列操作、JPEG／H.264 畫面與座標，以及 Opus／AAC／PCM 實際解碼與 AudioTrack 播放進度；九項網路整合測試在未指定測試 Host 時會明確略過。音訊 Smoke 會播放短暫、低振幅的合成測試音，不變更手機媒體音量。
+手機需解鎖，且允許測試使用相機。裝置測試使用獨立 Debug 套件與自己的站台資料。一般裝置測試有 31 項，包含縮放／拖移、工具列操作、JPEG／H.264 畫面與座標，以及 Opus／AAC／PCM 實際解碼與 AudioTrack 播放進度；11 項網路整合測試在未指定測試 Host 時會明確略過。音訊 Smoke 會播放短暫、低振幅的合成測試音，不變更手機媒體音量。Gradle 裝置測試暫時停用系統動畫，避免旋轉過渡矩陣使自動點擊偏離目標；不修改正式 APP 的動畫或座標處理。
 
 LAN 整合測試使用 `android/tests/smoke-host`，復用桌面端正式 TLS／P2P／音訊協定，提供合成影像／聲音、控制回應與 Shell 回音；不擷取桌面或系統錄音、不注入系統輸入，也不執行 OS Shell。先建立僅供測試的密碼檔，再於電腦啟動：
 
@@ -146,14 +146,21 @@ LAN 整合測試使用 `android/tests/smoke-host`，復用桌面端正式 TLS／
 go run ./android/tests/smoke-host -listen <本機區網IP>:47829 -secret-file <臨時測試密碼檔>
 android/gradlew -p android :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.smokeHost=<本機區網IP>:47829 \
-  -Pandroid.testInstrumentationRunnerArguments.smokeSecret=<相同臨時測試密碼>
+  -Pandroid.testInstrumentationRunnerArguments.smokeSecret=<相同臨時測試密碼> \
+  -Pandroid.testInstrumentationRunnerArguments.videoSoakSeconds=180
 ```
 
-只使用拋棄式測試密碼；結束後關閉測試 Host 並移除密碼檔。此測試驗證實際手機接收 JPEG／音訊、長按右鍵／滾輪控制、合成多螢幕切換、傳送 Unicode 控制、Shell UTF-8 回音、音訊協商／備援／靜音、背景暫停、重連及斷線回首頁。焦點與耳機拔除事件另以相同系統回呼驗證清理；不替代實際通話、耳機／藍牙切換、桌面 OS 擷取權限及輸入注入驗收。
+只使用拋棄式測試密碼；結束後關閉測試 Host 並移除密碼檔。此測試驗證實際手機接收 JPEG／音訊、長按右鍵／滾輪控制、合成多螢幕切換、傳送 Unicode 控制、Shell UTF-8 回音、音訊協商／備援／靜音、背景暫停、重連及斷線回首頁。新增 H.264／HEVC 的 1080p、60 FPS 來源 GOP、單幀遺失與畫面恢復、UI 心跳、控制往返及串流中關閉，另測連續八次立即直連重連。影片測試要求裝置支援兩種硬解；`videoSoakSeconds` 為每種格式的持續秒數，預設 20、範圍 10–600。以 TextureView 實際呈現回呼判定進度，不以接收封包數代替。焦點與耳機拔除事件另以相同系統回呼驗證清理；不替代實際通話、耳機／藍牙切換、桌面 OS 擷取權限及輸入注入驗收。
 
-## 本輪驗證與限制
+## 本次發行驗證與限制（2026-10-20）
 
-1.26.1003 build 2028 已整合自動更新器與函式級最佳化。25 項 JUnit、26 項瀏覽器回歸、10,620 個影像解析／解碼控制斷言、core race、policy 與原生 16 KiB 對齊檢查通過；Gradle Debug／未簽章 Release 建置成功，lint 為零 error、33 項 warning。本次以原正式金鑰簽章，憑證與 build 2301 相同；APK 版本、非 Debug、v2／v3 簽章、16 KiB ELF／ZIP、封裝雜湊與 GitHub 附件完整性均驗證。未完成本輪實機安裝更新與硬體解碼驗收，舊版須先手動安裝本版。詳見 [更新器](ANDROID-UPDATES.md) 與 [函式級最佳化](FUNCTION-OPTIMIZATION-2026-10-03.md)。
+1.26.1020 build 1252 納入背景解碼、缺幀恢復與立即重連修正。ASUS_I01WD／Android 11 完成 42 項實機測試，全部通過且沒有略過；1080p H.264／HEVC 各三分鐘，平均呈現 39.43／47.15 FPS，串流中關閉 140 ms，缺幀、背景返回及重連成功。另通過 25 項 JUnit、10,630 個解析／MediaCodec 替身斷言、非同步工作者及 Go／race Smoke。完整範圍與證據見 [Android 實機紀錄](ANDROID-DEVICE-2026-10-20.md)。
+
+本次正式 APK 沿用既有金鑰，驗證版本、非 Debug、v2／v3 簽章、16 KB ELF／ZIP 對齊與封裝 SHA-256；Release lint 為零 error／fatal、31 項 warning。單一 Android 11／4 KB 裝置及合成 LAN 來源不能代替 Android 16／16 KB 裝置、其他晶片、行動網路切換或數小時負載測試，也未在實機覆蓋安裝本次正式 APK。手機原正式套件與資料保持不變。
+
+### 歷史發行驗證（2026-10-03）
+
+1.26.1003 build 2028 已整合自動更新器與函式級最佳化。25 項 JUnit、26 項瀏覽器回歸、10,620 個影像解析／解碼控制斷言、core race、policy 與原生 16 KiB 對齊檢查通過；Gradle Debug／未簽章 Release 建置成功，lint 為零 error、33 項 warning。當時以原正式金鑰簽章，憑證與 build 2301 相同；APK 版本、非 Debug、v2／v3 簽章、16 KiB ELF／ZIP、封裝雜湊與 GitHub 附件完整性均驗證。該輪未完成實機安裝更新與硬體解碼驗收，更早版本須先手動安裝一次。詳見 [更新器](ANDROID-UPDATES.md) 與 [函式級最佳化](FUNCTION-OPTIMIZATION-2026-10-03.md)。
 
 ### 歷史實機驗證（2026-10-01）
 
@@ -167,8 +174,8 @@ android/gradlew -p android :app:connectedDebugAndroidTest \
 
 獨立公開的 Android Release 使用 `android-<版本>` 標籤，附上內含 APK 的 ZIP、ZIP SHA-256 與封裝紀錄，並設定 `latest=false`。桌面更新程式使用 `/releases/latest`，因此該入口維持桌面版；Android 下載入口由 README 明確連至對應發行頁。本機站台、憑證、ADB 備份與使用者桌面截圖不列入提交或發行附件。
 
-發行內文遵循[共同 Release 流程](RELEASE-WORKFLOW.md)，儲存於 `docs/RELEASE-<tag>.md`，從 `## 繁體中文` 開始，依序提供繁體中文、英文、日文、韓文。四語均須包含功能、安裝與升級注意事項、驗證範圍及已知限制；發布後讀回核對。本版來源為 [RELEASE-android-1.26.1001-build-1524.md](RELEASE-android-1.26.1001-build-1524.md)。修正既有發行的翻譯時，只更新內文，保留原 APK、標籤及發布狀態。
+發行內文遵循[共同 Release 流程](RELEASE-WORKFLOW.md)，儲存於 `docs/RELEASE-<tag>.md`，從 `## 繁體中文` 開始，依序提供繁體中文、英文、日文、韓文。四語均須包含功能、安裝與升級注意事項、驗證範圍及已知限制；發布後讀回核對。本版發行說明為 [RELEASE-1.26.1020-build-1252.md](RELEASE-1.26.1020-build-1252.md)；獨立 Android 發行範例見 [RELEASE-android-1.26.1001-build-1524.md](RELEASE-android-1.26.1001-build-1524.md)。修正既有發行的翻譯時，只更新內文，保留原 APK、標籤及發布狀態。
 
-16 KB 靜態檢查不能取代 [16 KB 裝置啟動與 JNI 驗證](https://developer.android.com/guide/practices/page-sizes)。Android 16 實機、HEVC／不同廠牌解碼器、平板／折疊螢幕、真實通話／耳機／藍牙切換、跨行動網路切換及長時間負載仍需對應環境驗收，不能由單一 Android 11 手機推論全部完成。音訊已驗證非靜音 PCM 與系統播放進度，沒有使用麥克風回錄喇叭輸出。
+16 KB 靜態檢查不能取代 [16 KB 裝置啟動與 JNI 驗證](https://developer.android.com/guide/practices/page-sizes)。Android 16 實機、其他廠牌解碼器、平板／折疊螢幕、真實通話／耳機／藍牙切換、跨行動網路切換及數小時負載仍需對應環境驗收，不能由單一 Android 11 手機推論全部完成。音訊已驗證非靜音 PCM 與系統播放進度，沒有使用麥克風回錄喇叭輸出。
 
 本次 Android 與桌面版合併至同一正式 Release；桌面版 latest 中包含 Android ZIP 不影響桌面平台附件選取。獨立 Android 發行仍採 android- 前綴與 latest=false。

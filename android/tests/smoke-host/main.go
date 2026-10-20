@@ -54,8 +54,10 @@ func main() {
 	err = signaling.ListenDirect(ctx, *listen, secret, func(session context.Context, client *signaling.Client) {
 		var receivedText atomic.Bool
 		desktop := newDesktopSmoke()
+		video := newVideoSmoke()
 		peer, err := p2p.NewHost(session, client, func(control p2p.Control) {
 			desktop.control(control)
+			video.control(control)
 			if control.Type == "text" && control.Text == "Android Smoke 中文" {
 				receivedText.Store(true)
 			}
@@ -67,12 +69,12 @@ func main() {
 		defer peer.Close()
 		attachAudio(session, peer)
 		desktop.attach(peer)
+		video.attach(peer)
 		register := func(name string, handler func(context.Context, json.RawMessage) (any, error)) {
 			if err := peer.RegisterCommandParams(name, handler); err != nil {
 				log.Fatal(err)
 			}
 		}
-		register("video.keyframe", func(context.Context, json.RawMessage) (any, error) { return map[string]bool{"accepted": true}, nil })
 		register("input.text-capabilities", func(context.Context, json.RawMessage) (any, error) { return map[string]bool{"supported": true}, nil })
 		var mu sync.Mutex
 		var sequence uint64
@@ -121,20 +123,29 @@ func main() {
 			ended = true
 			return map[string]bool{"closed": true}, nil
 		})
-		ticker := time.NewTicker(200 * time.Millisecond)
+		ticker := time.NewTicker(time.Second / 60)
 		defer ticker.Stop()
 		var index uint64
+		var lastJPEG time.Time
 		for {
 			select {
 			case <-session.Done():
 				return
 			case <-peer.Done():
-				log.Print("手機測試連線已結束")
+				log.Printf("手機測試連線已結束：%s", video)
 				return
 			case <-ticker.C:
 				if !peer.Connected() {
 					continue
 				}
+				if video.send(peer, index+1) {
+					index++
+					continue
+				}
+				if time.Since(lastJPEG) < 200*time.Millisecond {
+					continue
+				}
+				lastJPEG = time.Now()
 				payload := normal
 				if receivedText.Load() {
 					payload = acknowledged

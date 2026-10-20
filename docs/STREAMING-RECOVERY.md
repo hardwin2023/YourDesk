@@ -1,6 +1,6 @@
 # 串流過載與安全退出
 
-更新日期：2026-10-15。適用 Windows／macOS 桌面 Viewer 與 Android Viewer 的影片串流。目的在於限制排隊與等待，把原生驅動停滯和 UI 生命週期分開；不因「來源硬編、接收軟解」的組合本身就停用編碼。
+更新日期：2026-10-20。適用 Windows／macOS 桌面 Viewer 與 Android Viewer 的影片串流。目的在於限制排隊與等待，把原生驅動停滯和 UI 生命週期分開；不因「來源硬編、接收軟解」的組合本身就停用編碼。
 
 ## 各平台處理
 
@@ -28,9 +28,13 @@ Android TextureView 銷毀時回傳 `false`，由程式保留 SurfaceTexture，�
 - 各影片格式首張初始化不納入過載判定。連續三次處理至少 120 ms 且每次都有新增滿載丟幀時，撤回該格式，沿用能力協商切換其他候選，最後保留 JPEG。健康影格或沒有新的排隊壓力會中斷連續計數。
 - Android 從背景輸出的快照更新畫面／輸入準備狀態；重連、換螢幕、暫停或 Surface 變更後，舊世代的輸出不更新新畫面。
 
+Android 缺幀恢復與 Surface／連線重建分開：同一缺口只淘汰一次舊工作，保留已配置的 MediaCodec 並等待 IDR，避免硬體初始化慢於兩幀時反覆建立、銷毀而沒有輸出。Surface 模式且支援 `FEATURE_AdaptivePlayback` 的候選直接從新 IDR 接續；不支援者使用同步 `flush()`，若尚未收到第一筆輸出或格式變更，補送可能被 flush 清除的 CSD。硬體能力不明時採後者。這遵循 [MediaCodec 的串流邊界與自適應播放規則](https://developer.android.com/reference/android/media/MediaCodec#seeking--adaptive-playback-support)，並非依廠牌或型號繞過恢復。Surface 改變、換螢幕、重連與退出仍使用原生重建／延後釋放流程。
+
 三平台的鍵鼠傳送皆不讓 UI 持鎖等待網路。相鄰移動可合併，不能跨越按鍵、按鈕、滾輪或重設屏障。取消時清除未傳送的舊輸入；若按下事件已在傳送中，工作者完成後會先釋放實際送出的按鍵／按鈕，再處理重設後的新輸入。
 
 桌面 MCP 文字貼上的按鍵組也沿用同一工作者，保持順序並等待整組背景傳輸呼叫返回；等待與取消不持有輸入鎖，失焦或取消後不補送剩餘貼上鍵。這是傳輸交接結果，沒有增加遠端應用程式的貼上完成確認。
+
+IP 直連立即重連時，前一連線的 Host 清理可能尚未完成。桌面與 Android 共用的直連客戶端只針對此時的 HTTP 409，在既有十秒總期限內每 200 ms 重試，並接受取消；其他 HTTP、TLS 或網路錯誤直接回報。成功後仍使用該次 TLS exporter 綁定與密碼認證，不放寬同時連線或授權規則。
 
 ## 驗證與限制
 
@@ -40,4 +44,4 @@ Android TextureView 銷毀時回傳 `false`，由程式保留 SurfaceTexture，�
 - Android Go／race Smoke 驗證影片雙槽、JPEG 多區塊保留、滿載 IDR 復原，以及阻塞傳輸時的 5,000 筆移動、重設與按鈕釋放；AAR 核對來源指紋、個人路徑與 16 KB ELF。
 - Android Release lint、Debug／Release APK 編譯及 APK 原生庫／ZIP 對齊驗證通過。此為建置檢查，未另行發布新版本。
 
-上述 Smoke 與編譯不等同各廠牌驅動或長時間實機驗收；Android 本輪未連接測試裝置。Windows 原始回報的實機根因仍未確定，詳見 [Windows 卡頓紀錄](WINDOWS-IDLE-INPUT.md)。本地離線更新另見 [DMG／Portable ZIP 更新與回退](LOCAL-UPDATE.md)，不改動 Android 原有的 APK 更新與系統安裝確認。
+10 月 20 日以 ASUS／Android 11 補做實機驗證，包含 H.264／HEVC 1080p GOP、缺幀、背景恢復、串流中控制與關閉及立即重連；結果與限制見 [Android 實機紀錄](ANDROID-DEVICE-2026-10-20.md)。上述 Smoke 與編譯不等同全部廠牌驅動或數小時負載驗收。Windows 原始回報的實機根因仍未確定，詳見 [Windows 卡頓紀錄](WINDOWS-IDLE-INPUT.md)。本地離線更新另見 [DMG／Portable ZIP 更新與回退](LOCAL-UPDATE.md)，不改動 Android 原有的 APK 更新與系統安裝確認。

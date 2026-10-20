@@ -27,9 +27,46 @@ public final class VideoDecoderHostTest {
     formatFilteringAndCandidateFallback();
     bufferOwnershipAndBoundedFailure();
     resetAndKeyframeRecovery();
+    recoveryPreservesCodecAndResubmitsEarlyConfiguration();
+    adaptiveRecoveryWaitsForIdrWithoutFlushing();
     parserFuzz();
     largeAccessUnitStress();
     System.out.println("VideoDecoderHostTest PASS: " + assertions + " assertions (API fakes, no hardware decode)");
+  }
+
+  private static void adaptiveRecoveryWaitsForIdrWithoutFlushing() {
+    resetFakes();
+    MediaCodecInfo info=info("vendor.avc", "video/avc", true);info.adaptivePlayback=true;
+    MediaCodecList.infos=new MediaCodecInfo[]{info};
+    try(MediaCodecVideoDecoder decoder=new MediaCodecVideoDecoder()) {
+      Surface surface=new Surface();
+      check(decoder.queue(frame(true),surface)==1,"adaptive initial output");
+      MediaCodec codec=MediaCodec.instances.get(0);
+      decoder.recover();
+      check(decoder.needsKeyframe() && codec.flushes==0 && !codec.released,"adaptive recovery preserves valid native output");
+      check(decoder.queue(frame(false),surface)==0,"adaptive recovery rejects dependent frame");
+      check(decoder.queue(frame(true),surface)==1 && codec.configurations==0,"adaptive IDR resumes without flushing or resending CSD");
+    }
+  }
+
+  private static void recoveryPreservesCodecAndResubmitsEarlyConfiguration() {
+    resetFakes();
+    MediaCodecList.infos = new MediaCodecInfo[]{info("vendor.avc", "video/avc", true)};
+    MediaCodec.Plan plan = new MediaCodec.Plan(); plan.inputUnavailable = true;
+    MediaCodec.plans.put("vendor.avc", plan);
+    try (MediaCodecVideoDecoder decoder = new MediaCodecVideoDecoder()) {
+      Surface surface = new Surface();
+      check(decoder.queue(frame(true), surface) == 0, "initial input unavailable");
+      MediaCodec codec = MediaCodec.instances.get(0);
+      decoder.recover();
+      check(codec.flushes == 1 && !codec.released && decoder.isStarted(), "recovery preserves configured hardware");
+      check(decoder.queue(frame(false), surface) == 0, "recovery rejects dependent frame");
+      plan.inputUnavailable = false;
+      check(decoder.queue(frame(true), surface) == 1, "new IDR resumes rendering");
+      check(codec.configurations == 1 && MediaCodec.instances.size() == 1, "early flush resubmits CSD without reconfiguration");
+      decoder.recover();
+      check(decoder.queue(frame(true), surface) == 1 && codec.configurations == 1, "running recovery reuses known configuration");
+    }
   }
 
   private static void avcAndHevcCsd() {

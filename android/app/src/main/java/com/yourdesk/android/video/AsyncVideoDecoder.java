@@ -18,6 +18,7 @@ public final class AsyncVideoDecoder implements AutoCloseable {
     boolean isStarted();
     int failedWireCodec();
     String backend();
+    default void recover() { reset(); }
     void reset();
     void resetSession();
     @Override void close();
@@ -31,6 +32,7 @@ public final class AsyncVideoDecoder implements AutoCloseable {
     public boolean isStarted() { return decoder.isStarted(); }
     public int failedWireCodec() { return decoder.failedWireCodec(); }
     public String backend() { return decoder.backend(); }
+    public void recover() { decoder.recover(); }
     public void reset() { decoder.reset(); }
     public void resetSession() { decoder.resetSession(); }
     public void close() { decoder.close(); }
@@ -51,6 +53,7 @@ public final class AsyncVideoDecoder implements AutoCloseable {
   private final ArrayDeque<Runnable> releases = new ArrayDeque<>();
   private boolean finished;
   private boolean closed, retired, resetRequested, sessionResetRequested, active;
+  private boolean recoveryOnly;
   private boolean acceptingDelta, awaitingKeyframe = true, started, failurePending;
   private long generation, session, callStarted, drops;
   private int rendered, failedMask, currentCodec;
@@ -81,7 +84,7 @@ public final class AsyncVideoDecoder implements AutoCloseable {
       if (closed || retired || (failedMask & (1 << frame.codec)) != 0) return -1;
       if (jobs.size() >= (active ? 1 : 2)) {
         drops++;
-        resetLocked(false);
+        recoverLocked();
       }
       if (!acceptingDelta && !frame.keyframe) return 0;
       acceptingDelta = true;
@@ -102,6 +105,7 @@ public final class AsyncVideoDecoder implements AutoCloseable {
   public int wireCodec() { synchronized (lock) { return currentCodec; } }
   public int failedCodecMask() { synchronized (lock) { return failedMask; } }
   public void noteDroppedFrame() { synchronized (lock) { drops++; } }
+  public void recover() { synchronized (lock) { recoverLocked(); } }
   public void reset() { synchronized (lock) { resetLocked(false); } }
   public void resetSession() { synchronized (lock) { resetLocked(true); } }
   /** TextureView 回傳 false 後，延後至原生 renderer 停止才釋放 SurfaceTexture。 */
@@ -123,11 +127,23 @@ public final class AsyncVideoDecoder implements AutoCloseable {
     generation++; jobs.clear(); rendered = 0; started = false;
     acceptingDelta = false; awaitingKeyframe = true;
     resetRequested = true; sessionResetRequested |= newSession;
+    recoveryOnly = false;
     if (newSession) {
       session++; failedMask = retired ? VIDEO_MASK : 0; failurePending = false; drops = 0;
       java.util.Arrays.fill(warmed, false); java.util.Arrays.fill(slow, 0); java.util.Arrays.fill(observedDrops, 0);
     }
     lock.notifyAll();
+  }
+
+  private void recoverLocked() {
+    // 等候 IDR 期間的每個相依幀都可能帶來同一缺口通知，不重複 flush。
+    // 首次恢復已淘汰舊工作；新的 IDR 入列後才可能需要下一次恢復。
+    if (!acceptingDelta) return;
+    // 缺幀不重新配置硬體；否則初始化慢於兩幀時會永遠卡在建立／銷毀循環。
+    // 若已有 Surface／工作階段重設，仍保留較強的重設與資源回收要求。
+    boolean hardPending = resetRequested && !recoveryOnly;
+    resetLocked(false);
+    recoveryOnly = !hardPending;
   }
 
   private void checkTimeout() {
@@ -148,7 +164,7 @@ public final class AsyncVideoDecoder implements AutoCloseable {
       synchronized (lock) { callStarted = 0; }
       for (;;) {
         Job job;
-        boolean reset, newSession;
+        boolean reset, newSession, recover;
         long epoch, sessionEpoch;
         synchronized (lock) {
           if (closed || retired) break;
@@ -157,7 +173,9 @@ public final class AsyncVideoDecoder implements AutoCloseable {
             if (closed || retired) break;
           }
           reset = resetRequested; newSession = sessionResetRequested;
+          recover = recoveryOnly;
           resetRequested = sessionResetRequested = false;
+          recoveryOnly = false;
           job = reset ? null : jobs.pollFirst();
           epoch = generation; sessionEpoch = session;
           active = true; callStarted = System.nanoTime();
@@ -168,7 +186,10 @@ public final class AsyncVideoDecoder implements AutoCloseable {
         String name = "";
         long cost;
         try {
-          if (reset) { if (newSession) engine.resetSession(); else engine.reset(); releaseSurfaces(false); }
+          if (reset) {
+            if (newSession) engine.resetSession(); else if (recover) engine.recover(); else engine.reset();
+            if (!recover) releaseSurfaces(false);
+          }
           else if (job != null) count = engine.queue(job.frame, job.surface);
           else count = engine.drainOutput();
           needKeyframe = engine.needsKeyframe(); running = engine.isStarted();

@@ -142,12 +142,33 @@ func DialDirect(ctx context.Context, address string, secret []byte) (*Client, er
 	httpClient := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("直連禁止重新導向") }}
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(dialCtx, "wss://"+address+"/direct", &websocket.DialOptions{HTTPClient: httpClient})
-	if err != nil {
-		return nil, fmt.Errorf("IP 直連失敗：%w", err)
+	defer transport.CloseIdleConnections()
+	var conn *websocket.Conn
+	for {
+		var response *http.Response
+		var err error
+		conn, response, err = websocket.Dial(dialCtx, "wss://"+address+"/direct", &websocket.DialOptions{HTTPClient: httpClient})
+		if err == nil {
+			break
+		}
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		// 前一個工作階段仍在回收時，Host 暫時回覆 409。沿用整體十秒期限，
+		// 僅重試此狀態；TLS、認證或其他網路錯誤仍直接返回。
+		if response == nil || response.StatusCode != http.StatusConflict {
+			return nil, fmt.Errorf("IP 直連失敗：%w", err)
+		}
+		timer := time.NewTimer(200 * time.Millisecond)
+		select {
+		case <-dialCtx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("IP 直連等待前一工作階段結束：%w", dialCtx.Err())
+		case <-timer.C:
+		}
 	}
 	client := &Client{conn: conn, room: "direct", role: RoleViewer, secret: secret, binding: binding}
-	if err = client.Send(ctx, KindJoin, nil); err != nil {
+	if err := client.Send(ctx, KindJoin, nil); err != nil {
 		conn.CloseNow()
 		return nil, err
 	}

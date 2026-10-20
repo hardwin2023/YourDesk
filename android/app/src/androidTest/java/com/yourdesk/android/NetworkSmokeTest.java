@@ -6,21 +6,26 @@ import android.app.Instrumentation;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.SurfaceTexture;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.InputDevice;
+import android.view.TextureView;
 import android.webkit.WebView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.yourdesk.androidcore.core.Viewer;
 import com.yourdesk.android.audio.RemoteAudioSession;
+import com.yourdesk.android.video.AsyncVideoDecoder;
+import com.yourdesk.android.video.DecoderSupport;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Before;
@@ -235,6 +240,145 @@ public class NetworkSmokeTest {
       waitJS("location.pathname.endsWith('/index.html') && typeof openConnection==='function'");
       SystemClock.sleep(400);
     }
+  }
+
+  @Test public void rapidDirectReconnectReleasesPreviousSession() throws Exception {
+    for(int attempt=0;attempt<8;attempt++) {
+      Viewer session=new Viewer();
+      try { session.connect("",host,secret); assertTrue(session.isConnected()); }
+      finally { session.close(); }
+    }
+  }
+
+  /** 真正的 TextureView 呈現回呼；不可只以收到封包或解碼器名稱判定成功。 */
+  private AtomicInteger observeVideoFrames() throws Exception {
+    AtomicInteger frames = new AtomicInteger();
+    instrumentation.runOnMainSync(() -> {
+      try {
+        TextureView view = (TextureView) field("nativeVideo");
+        TextureView.SurfaceTextureListener original = view.getSurfaceTextureListener();
+        view.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+          public void onSurfaceTextureAvailable(SurfaceTexture s, int w, int h) { original.onSurfaceTextureAvailable(s,w,h); }
+          public void onSurfaceTextureSizeChanged(SurfaceTexture s, int w, int h) { original.onSurfaceTextureSizeChanged(s,w,h); }
+          public boolean onSurfaceTextureDestroyed(SurfaceTexture s) { return original.onSurfaceTextureDestroyed(s); }
+          public void onSurfaceTextureUpdated(SurfaceTexture s) { frames.incrementAndGet(); original.onSurfaceTextureUpdated(s); }
+        });
+      } catch (Exception e) { throw new AssertionError(e); }
+    });
+    return frames;
+  }
+
+  private String waitVideo(int codec, AtomicInteger frames, int after) throws Exception {
+    AsyncVideoDecoder decoder = (AsyncVideoDecoder) field("videoDecoder");
+    long deadline = SystemClock.uptimeMillis()+15000;
+    while (SystemClock.uptimeMillis()<deadline) {
+      if (frames.get()>after+4 && decoder.wireCodec()==codec && decoder.isStarted() && !decoder.needsKeyframe()) return decoder.backend();
+      assertEquals("硬體影片不可在正常串流中被撤回；backend="+decoder.backend(),0,decoder.failedCodecMask());
+      SystemClock.sleep(50);
+    }
+    throw new AssertionError("硬體影片沒有持續呈現；codec="+codec+" backend="+decoder.backend()+" frames="+frames.get());
+  }
+
+  private long uiHeartbeat() throws Exception {
+    CountDownLatch done = new CountDownLatch(1);
+    long begin = SystemClock.elapsedRealtime();
+    new android.os.Handler(android.os.Looper.getMainLooper()).post(done::countDown);
+    assertTrue("UI 被解碼或傳輸阻塞超過 1 秒",done.await(1,TimeUnit.SECONDS));
+    return SystemClock.elapsedRealtime()-begin;
+  }
+
+  private String videoDiagnostic() throws Exception {
+    AsyncVideoDecoder decoder=(AsyncVideoDecoder)field("videoDecoder");
+    StringBuilder state=new StringBuilder("codec=").append(decoder.wireCodec())
+        .append(" backend=").append(decoder.backend()).append(" started=").append(decoder.isStarted())
+        .append(" needsKeyframe=").append(decoder.needsKeyframe()).append(" failed=").append(decoder.failedCodecMask());
+    for(String name:new String[]{"generation","drops","active","acceptingDelta","resetRequested","recoveryOnly","rendered"}) {
+      Field value=AsyncVideoDecoder.class.getDeclaredField(name);value.setAccessible(true);
+      state.append(' ').append(name).append('=').append(value.get(decoder));
+    }
+    state.append(" foreground=").append(field("foreground")).append(" videoSequence=").append(field("videoSequence"));
+    for(java.util.Map.Entry<Thread,StackTraceElement[]> thread:Thread.getAllStackTraces().entrySet()) {
+      if(!thread.getKey().getName().equals("YourDesk-video-decoder"))continue;
+      state.append(" worker=").append(java.util.Arrays.toString(thread.getValue()));
+    }
+    return state.toString();
+  }
+
+  private long decoderGeneration() throws Exception {
+    AsyncVideoDecoder decoder=(AsyncVideoDecoder)field("videoDecoder");
+    Field lock=AsyncVideoDecoder.class.getDeclaredField("lock"),generation=AsyncVideoDecoder.class.getDeclaredField("generation");
+    lock.setAccessible(true);generation.setAccessible(true);
+    synchronized(lock.get(decoder)) { return generation.getLong(decoder); }
+  }
+
+  @Test public void hardwareGopStreamingRemainsResponsiveAndRecovers() throws Exception {
+    connect("desktop"); waitJS("location.pathname.endsWith('/desktop.html')");
+    AtomicInteger frames = observeVideoFrames();
+    int seconds = Math.max(10,Math.min(600,Integer.parseInt(InstrumentationRegistry.getArguments().getString("videoSoakSeconds","20"))));
+    org.json.JSONArray results = new org.json.JSONArray();
+    for (int codec : new int[]{1,2}) {
+      String name=codec==1?"h264":"hevc",mime=codec==1?"video/avc":"video/hevc";
+      assertNotNull("此驗收需要實際硬體解碼 "+mime,DecoderSupport.findHardwareDecoder(mime));
+      int start=frames.get(); command("smoke.video."+name);
+      String backend=waitVideo(codec,frames,start);
+      long maxUi=0,maxControl=0,begin=SystemClock.elapsedRealtime();
+      long lastProgress=begin;
+      int steadyStart=frames.get();
+      int last=frames.get(),idle=0;
+      while(SystemClock.elapsedRealtime()-begin<seconds*1000L) {
+        maxUi=Math.max(maxUi,uiHeartbeat());
+        long sent=SystemClock.elapsedRealtime();
+        // 走新版輸入工作者，Host 屏障只能在輸入真正抵達後回覆。
+        command("smoke.input.clean");
+        maxControl=Math.max(maxControl,SystemClock.elapsedRealtime()-sent);
+        SystemClock.sleep(1000);
+        int current=frames.get(); idle=current==last?idle+1:0; last=current;
+        if(idle>0)android.util.Log.i("YourDeskDeviceSmoke","idle="+idle+" frames="+current+" "+videoDiagnostic());
+        assertTrue("影像連續三秒沒有更新："+name+" "+(idle>=3?videoDiagnostic():""),idle<3);
+        assertTrue("串流中控制回應超過 2 秒",maxControl<2000);
+        assertEquals(0,((AsyncVideoDecoder)field("videoDecoder")).failedCodecMask());
+        if(SystemClock.elapsedRealtime()-lastProgress>=30000) {
+          lastProgress=SystemClock.elapsedRealtime();
+          android.util.Log.i("YourDeskDeviceSmoke","progress codec="+name+" seconds="+((lastProgress-begin)/1000)
+              +" rendered="+(current-steadyStart)+" maxUiMs="+maxUi+" maxControlMs="+maxControl);
+        }
+      }
+      long elapsedMs=SystemClock.elapsedRealtime()-begin;
+      int steadyRendered=frames.get()-steadyStart;
+      assertTrue("持續串流必須有實際顯示影格",frames.get()-start>=seconds*15);
+      long beforeDrop=decoderGeneration();command("smoke.video.drop");
+      long recoveryDeadline=SystemClock.elapsedRealtime()+10000;
+      while(decoderGeneration()==beforeDrop && SystemClock.elapsedRealtime()<recoveryDeadline)SystemClock.sleep(20);
+      assertTrue("遺失影格應觸發實際恢復",decoderGeneration()>beforeDrop);
+      waitVideo(codec,frames,frames.get());
+      // 真正切換到背景，觸發 Surface 銷毀、延後釋放，再回前景重建。
+      instrumentation.runOnMainSync(()->assertTrue(activity.moveTaskToBack(true)));
+      waitField("foreground",false); SystemClock.sleep(600);
+      int beforeResume=frames.get();
+      instrumentation.runOnMainSync(()->activity.startActivity(new Intent(activity,MainActivity.class)
+          .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_NEW_TASK)));
+      waitField("foreground",true); waitVideo(codec,frames,beforeResume);
+      JSONObject result=new JSONObject().put("codec",name).put("backend",backend).put("seconds",seconds)
+          .put("rendered",frames.get()-start).put("steadyRendered",steadyRendered).put("elapsedMs",elapsedMs)
+          .put("fps",steadyRendered*1000.0/elapsedMs).put("maxUiMs",maxUi).put("maxControlMs",maxControl);
+      results.put(result); android.util.Log.i("YourDeskDeviceSmoke",result.toString());
+      saveScreenshot("stream-"+name);
+    }
+    // 影片尚在輸出時操作正式關閉入口，再建立新連線。
+    long closeBegin=SystemClock.elapsedRealtime();
+    js("document.getElementById('back').click()");
+    waitJS("location.pathname.endsWith('/index.html') && typeof openConnection==='function'");
+    long closeMs=SystemClock.elapsedRealtime()-closeBegin;
+    assertTrue("關閉影片工作階段不可等待驅動",closeMs<3000);
+    connect("desktop"); waitJS("location.pathname.endsWith('/desktop.html')");
+    int beforeReconnect=frames.get(); command("smoke.video.h264"); waitVideo(1,frames,beforeReconnect);
+    JSONObject report=new JSONObject().put("device",android.os.Build.MODEL).put("android",android.os.Build.VERSION.RELEASE)
+        .put("streams",results).put("closeMs",closeMs).put("reconnect",true);
+    java.io.File output=new java.io.File(activity.getExternalFilesDir(null),"video-device-smoke.json");
+    try(java.io.FileOutputStream file=new java.io.FileOutputStream(output)) {
+      file.write(report.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    android.util.Log.i("YourDeskDeviceSmoke",report.toString());
   }
 
   private void audioEnabled(boolean enabled) {

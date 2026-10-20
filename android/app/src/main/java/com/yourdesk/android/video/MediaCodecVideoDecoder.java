@@ -1,6 +1,7 @@
 package com.yourdesk.android.video;
 
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.view.Surface;
 
@@ -21,6 +22,7 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
   private byte[] csd1;
   private long presentationUs;
   private boolean started;
+  private boolean outputStarted, codecConfigPending, adaptivePlayback;
   private boolean awaitingKeyframe = true;
   private final Set<String> failedCandidates = new HashSet<>();
   private final boolean[] unavailableCodecs = new boolean[3];
@@ -39,6 +41,20 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
     if (awaitingKeyframe && !frame.keyframe) return 0;
     try {
       if (!started && !configure(target, frame)) return -1;
+      // 首張輸出前 flush 可能清除 configure() 自動提交的 CSD；依 API 契約補送。
+      if (codecConfigPending) {
+        int configIndex = codec.dequeueInputBuffer(0);
+        if (configIndex < 0) {
+          if (++inputMisses >= 3) return failCurrentDecoder(frame.codec);
+          return drain();
+        }
+        ByteBuffer config = codec.getInputBuffer(configIndex);
+        int size = csd0.length + (csd1 == null ? 0 : csd1.length);
+        if (config == null || config.capacity() < size) return failCurrentDecoder(frame.codec);
+        config.clear(); config.put(csd0); if (csd1 != null) config.put(csd1);
+        codec.queueInputBuffer(configIndex, 0, size, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG);
+        codecConfigPending = false;
+      }
       int inputIndex = codec.dequeueInputBuffer(0);
       if (inputIndex < 0) {
         // queue 的呼叫者不會重送此 access unit；捨棄後必須從新 IDR 恢復。
@@ -96,6 +112,10 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
         next = MediaCodec.createByCodecName(candidate);
         next.configure(format, target, null, 0);
         next.start();
+        try {
+          adaptivePlayback = next.getCodecInfo().getCapabilitiesForType(mime)
+              .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_AdaptivePlayback);
+        } catch (RuntimeException unsupported) { adaptivePlayback = false; }
         codec = next;
         surface = target;
         codecName = candidate;
@@ -106,6 +126,7 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
         csd1 = frame.csd1;
         presentationUs = 0;
         started = true;
+        outputStarted = codecConfigPending = false;
         awaitingKeyframe = true;
         failedWireCodec = 0;
         return true;
@@ -145,8 +166,9 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
     for (int i = 0; i < 8; i++) {
       int output = codec.dequeueOutputBuffer(info, 0);
       if (output == MediaCodec.INFO_TRY_AGAIN_LATER) break;
-      if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) continue;
+      if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) { outputStarted = true; continue; }
       if (output >= 0) {
+        outputStarted = true;
         codec.releaseOutputBuffer(output, true);
         rendered++;
       }
@@ -156,7 +178,18 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
 
   public synchronized boolean isStarted() { return started; }
   public synchronized String backend() { return codecName == null ? "" : codecName; }
-  /** Surface／缺幀恢復不清除候選黑名單，防止反覆碰到同一個壞 decoder。 */
+  /** 丟幀後保留已配置的同步 MediaCodec，等候新的 IDR。 */
+  public synchronized void recover() {
+    awaitingKeyframe = true;
+    inputMisses = 0;
+    if (codec == null || !started) return;
+    // Surface + adaptive playback 允許直接從新 IDR 接續，無須 flush。
+    // 避免每次短暫丟幀都清空硬體尚未呈現的有效輸出；不支援者依 API 契約 flush。
+    if (adaptivePlayback) return;
+    try { codec.flush(); codecConfigPending |= !outputStarted; }
+    catch (RuntimeException error) { failCurrentDecoder(wireCodec); }
+  }
+  /** Surface 重建不清除候選黑名單，防止反覆碰到同一個壞 decoder。 */
   public synchronized void reset() { releaseCodec(); awaitingKeyframe = true; }
   public synchronized void resetSession() {
     reset();
@@ -175,6 +208,7 @@ public final class MediaCodecVideoDecoder implements AutoCloseable {
     wireCodec = width = height = inputMisses = 0;
     presentationUs = 0;
     started = false;
+    outputStarted = codecConfigPending = adaptivePlayback = false;
   }
 
   private static void release(MediaCodec codec) {

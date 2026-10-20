@@ -65,6 +65,8 @@ android {
     androidResources { ignoreAssetsPattern = "!.git:!.svn:!.DS_Store:!*.bak:!*.bak.*:!*~" }
     sourceSets.getByName("androidTest").assets.srcDir("../tests/smoke-host/fixtures")
     lint { abortOnError = true; checkReleaseBuilds = true }
+    // 系統旋轉／視窗動畫會暫時改變輸入轉換矩陣；自動點擊驗證使用固定幾何。
+    testOptions { animationsDisabled = true }
 }
 
 val verifyReleaseNativeLibraries = tasks.register<Exec>("verifyReleaseNativeLibraries") {

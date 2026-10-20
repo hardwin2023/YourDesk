@@ -371,8 +371,7 @@ public class FullscreenEdgeSwipeTest {
       return null;
     });
     await("影片 Surface 就緒", () -> ui(() -> field("videoSurface") != null));
-    await("MediaCodec 實際輸出 H.264 測試影格", () -> ui(() -> (boolean)
-        invoke("presentVideoFrame", new Class[]{EncodedVideoFrame.class}, frame)));
+    awaitVideoFrame(frame);
     enterFullscreen();
     await("H.264 保持比例且完整呈現四邊", this::screenshotHasGreenBorder);
     assertTouchCorners(true);
@@ -473,7 +472,7 @@ public class FullscreenEdgeSwipeTest {
       return null;
     });
     await("影片 Surface 就緒", () -> ui(() -> field("videoSurface") != null));
-    await("H.264 實際解碼", () -> ui(() -> (boolean) invoke("presentVideoFrame", new Class[]{EncodedVideoFrame.class}, frame)));
+    awaitVideoFrame(frame);
     enterFullscreen();
     ui(() -> {
       View screen = (View) field("nativeVideo");
@@ -549,14 +548,27 @@ public class FullscreenEdgeSwipeTest {
     ui(()->{assertEquals(false,invoke("applyFrameJSON",new Class[]{String.class},delta));assertTrue((boolean)field("displayInputBlocked"));return null;});
     String keyframe=frame.put("keyframe",true).toString();
     ui(()->{invoke("applyFrameJSON",new Class[]{String.class},keyframe);return null;});
-    await("新螢幕 H.264 實際解碼",()->ui(()->{
-      return (int)invoke("drainVideoFrames",new Class[]{})>0 || (int)field("pumpRenderedFrames")>0;
-    }));
+    awaitVideoFrame(EncodedVideoFrame.parse(1,1920,1080,payload,true));
     ui(()->{assertEquals(1,field("viewportDisplay"));assertFalse((boolean)field("displayInputBlocked"));assertEquals(1f,((DesktopViewport)field("desktopViewport")).zoom(),0);return null;});
   }
 
   private void chooseViewportItem(String title) throws Exception {
     NativeMenuTestHelper.choose(instrumentation,activity,ui(()->(View)field("viewportButton")),title);
+  }
+
+  private void awaitVideoFrame(EncodedVideoFrame frame) {
+    // 真正網路工作階段由 frame pump 取得背景結果；本機 fixture 沒有啟動該 pump。
+    // 只有 decoder 要求 IDR 時模擬 Host 回覆，不能把非同步 queue() 當作呈現完成。
+    long[] lastSubmitted={0};
+    await("背景 MediaCodec 實際呈現影格",()->ui(()->{
+      if ((int)invoke("drainVideoFrames",new Class[]{})>0) return true;
+      com.yourdesk.android.video.AsyncVideoDecoder decoder=(com.yourdesk.android.video.AsyncVideoDecoder)field("videoDecoder");
+      if (decoder.needsKeyframe() && SystemClock.uptimeMillis()-lastSubmitted[0]>=150) {
+        invoke("presentVideoFrame",new Class[]{EncodedVideoFrame.class},frame);
+        lastSubmitted[0]=SystemClock.uptimeMillis();
+      }
+      return false;
+    }));
   }
 
   private void showQuadrants() throws Exception {
@@ -706,7 +718,7 @@ public class FullscreenEdgeSwipeTest {
   private void inject(long down, int action, float x, float y) {
     MotionEvent event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0);
     event.setSource(InputDevice.SOURCE_TOUCHSCREEN);
-    assertTrue(instrumentation.getUiAutomation().injectInputEvent(event, true));
+    instrumentation.sendPointerSync(event);
     event.recycle();
   }
 

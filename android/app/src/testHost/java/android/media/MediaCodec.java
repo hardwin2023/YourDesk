@@ -8,7 +8,7 @@ import java.util.Map;
 
 /** Stateful fake records input ownership and rejects operations after release. */
 public final class MediaCodec {
-  public static final int BUFFER_FLAG_KEY_FRAME = 1, INFO_TRY_AGAIN_LATER = -1,
+  public static final int BUFFER_FLAG_KEY_FRAME = 1, BUFFER_FLAG_CODEC_CONFIG = 2, INFO_TRY_AGAIN_LATER = -1,
       INFO_OUTPUT_FORMAT_CHANGED = -2;
   public static final class BufferInfo { }
   public static final class Plan {
@@ -20,12 +20,16 @@ public final class MediaCodec {
   public final String name;
   public final Plan plan;
   public boolean released, started, ownsInput;
-  public int queued, rendered;
+  public int queued, rendered, flushes, configurations;
   public MediaFormat configured;
   private int availableOutputs;
   private MediaCodec(String name) { this.name = name; plan = plans.computeIfAbsent(name, k -> new Plan()); }
   public static MediaCodec createByCodecName(String name) {
     MediaCodec codec = new MediaCodec(name); instances.add(codec); return codec;
+  }
+  public MediaCodecInfo getCodecInfo() {
+    for (MediaCodecInfo info : MediaCodecList.infos) if (name.equals(info.getName())) return info;
+    throw new IllegalStateException("missing descriptor");
   }
   public void configure(MediaFormat format, Surface target, Object crypto, int flags) {
     if (plan.configureThrows) throw new IllegalStateException("configure failure");
@@ -46,7 +50,9 @@ public final class MediaCodec {
     requireStarted();
     if (plan.queueThrows) throw new IllegalStateException("queue failure");
     if (!ownsInput) throw new IllegalStateException("input not owned");
-    ownsInput = false; queued++; availableOutputs++;
+    ownsInput = false;
+    if ((flags & BUFFER_FLAG_CODEC_CONFIG) != 0) configurations++;
+    else { queued++; availableOutputs++; }
   }
   public int dequeueOutputBuffer(BufferInfo info, long timeout) {
     requireStarted();
@@ -55,6 +61,7 @@ public final class MediaCodec {
     availableOutputs--; return 0;
   }
   public void releaseOutputBuffer(int index, boolean render) { requireStarted(); if (render) rendered++; }
+  public void flush() { requireStarted(); flushes++; ownsInput = false; availableOutputs = 0; }
   public void stop() { started = false; ownsInput = false; }
   public void release() { released = true; started = false; ownsInput = false; }
   private void requireStarted() {

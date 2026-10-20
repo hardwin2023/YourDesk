@@ -11,9 +11,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class AsyncVideoDecoderHostTest {
   private static final class Engine implements AsyncVideoDecoder.Engine {
     final CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1), closed = new CountDownLatch(1);
-    volatile boolean block, started;
+    volatile boolean block, started, awaitingKeyframe = true;
     volatile int delayMs;
     final AtomicInteger calls = new AtomicInteger();
+    final AtomicInteger recoveries = new AtomicInteger(), resets = new AtomicInteger();
     volatile Thread owner;
     private void owner() {
       if (owner == null) owner = Thread.currentThread();
@@ -23,14 +24,15 @@ public final class AsyncVideoDecoderHostTest {
       owner(); calls.incrementAndGet(); entered.countDown();
       try { if (block) release.await(); if (delayMs > 0) Thread.sleep(delayMs); }
       catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-      started = true; return 1;
+      started = true; awaitingKeyframe = false; return 1;
     }
     public int drainOutput() { owner(); return 0; }
-    public boolean needsKeyframe() { owner(); return !started; }
+    public boolean needsKeyframe() { owner(); return awaitingKeyframe; }
     public boolean isStarted() { owner(); return started; }
     public int failedWireCodec() { owner(); return 0; }
     public String backend() { owner(); return "替身硬解"; }
-    public void reset() { owner(); started = false; }
+    public void recover() { owner(); recoveries.incrementAndGet(); awaitingKeyframe = true; }
+    public void reset() { owner(); resets.incrementAndGet(); started = false; awaitingKeyframe = true; }
     public void resetSession() { reset(); }
     public void close() { owner(); closed.countDown(); }
   }
@@ -38,7 +40,44 @@ public final class AsyncVideoDecoderHostTest {
     blockedDriverAndSurfaceOwnership();
     overloadNeedsPressure();
     normalOutputAndSessionReset();
+    startupOverflowPreservesNativeSession();
+    surfaceResetTakesPriorityOverRecovery();
     System.out.println("AsyncVideoDecoderHostTest PASS：阻塞、期限、雙槽、Surface 所有權、過載與重連（原生引擎替身）");
+  }
+
+  private static void surfaceResetTakesPriorityOverRecovery() throws Exception {
+    Engine engine=new Engine();engine.block=true;
+    AsyncVideoDecoder decoder=new AsyncVideoDecoder(()->engine,TimeUnit.SECONDS.toNanos(2),new AtomicBoolean());
+    AtomicBoolean released=new AtomicBoolean();
+    decoder.queue(frame(true),new Surface());
+    check(engine.entered.await(1,TimeUnit.SECONDS),"未開始原生解碼");
+    decoder.resetAfter(()->released.set(true));
+    decoder.queue(frame(true),new Surface());
+    decoder.recover();
+    engine.release.countDown();
+    await(released::get,"缺幀恢復覆蓋 Surface 的完整重設");
+    check(engine.resets.get()==1 && engine.recoveries.get()==0,"Surface 重設被降級為缺幀恢復");
+    decoder.close();check(engine.closed.await(1,TimeUnit.SECONDS),"關閉未回收原生擁有者");
+  }
+
+  private static void startupOverflowPreservesNativeSession() throws Exception {
+    Engine engine = new Engine(); engine.block = true;
+    AsyncVideoDecoder decoder = new AsyncVideoDecoder(() -> engine, TimeUnit.SECONDS.toNanos(2), new AtomicBoolean());
+    Surface surface = new Surface();
+    decoder.queue(frame(true),surface);
+    check(engine.entered.await(1,TimeUnit.SECONDS),"startup did not begin");
+    decoder.queue(frame(false),surface); decoder.queue(frame(false),surface);
+    engine.release.countDown();
+    await(()->engine.recoveries.get()==1,"overflow did not recover native references");
+    check(engine.resets.get()==0,"slow startup repeatedly destroys native session");
+    for (int i=0;i<100;i++) { decoder.recover(); decoder.queue(frame(false),surface); }
+    Thread.sleep(40);
+    check(engine.recoveries.get()==1,"同一缺口的重複通知反覆清空解碼器");
+    check(decoder.needsKeyframe(),"恢復完成後仍應等待 IDR");
+    decoder.queue(frame(true),surface);
+    AtomicInteger rendered = new AtomicInteger();
+    await(()->{ rendered.addAndGet(Math.max(0,decoder.drainOutput())); return rendered.get()>0; },"next IDR did not recover output");
+    decoder.close(); check(engine.closed.await(1,TimeUnit.SECONDS),"close did not release native owner");
   }
   private static void blockedDriverAndSurfaceOwnership() throws Exception {
     Engine engine = new Engine(); engine.block = true;

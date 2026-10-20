@@ -1218,7 +1218,7 @@ public final class MainActivity extends ComponentActivity {
         if (session.consumeFrameRecoveryRequest()) {
           jpegPolicy.invalidate();
           videoDecoder.noteDroppedFrame();
-          videoDecoder.reset();
+          videoDecoder.recover();
           requestVideoKeyframe();
         }
         if (videoMode) {
@@ -1383,7 +1383,7 @@ public final class MainActivity extends ComponentActivity {
         byte[] payload = Base64.decode(encoded, Base64.DEFAULT);
         EncodedVideoFrame frame = EncodedVideoFrame.parse(codec, fullWidth, fullHeight, payload, keyframe);
         if (frame == null) {
-          videoDecoder.reset();
+          videoDecoder.recover();
           requestVideoKeyframe();
           return false;
         }
@@ -1394,7 +1394,7 @@ public final class MainActivity extends ComponentActivity {
         composedSequence = sequence;
         jpegPolicy.invalidate();
         if (videoSequence > 0 && sequence != videoSequence + 1) {
-          videoDecoder.reset();
+          videoDecoder.recover();
           requestVideoKeyframe();
         }
         videoSequence = sequence;

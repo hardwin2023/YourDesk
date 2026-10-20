@@ -4,7 +4,7 @@ public final class MediaCodecInfo {
   private final String name, mime;
   private final boolean hardware;
   public int maxWidth = 8192, maxHeight = 8192, onlyProfile = -1;
-  public boolean descriptorThrows;
+  public boolean descriptorThrows, adaptivePlayback;
   public MediaCodecInfo(String name, String mime, boolean hardware) {
     this.name = name; this.mime = mime; this.hardware = hardware;
   }
@@ -18,6 +18,8 @@ public final class MediaCodecInfo {
   public boolean isHardwareAccelerated() { return hardware; }
   public CodecCapabilities getCapabilitiesForType(String ignored) { return new CodecCapabilities(); }
   public final class CodecCapabilities {
+    public static final String FEATURE_AdaptivePlayback = "adaptive-playback";
+    public boolean isFeatureSupported(String feature) { return FEATURE_AdaptivePlayback.equals(feature) && adaptivePlayback; }
     public boolean isFormatSupported(MediaFormat format) {
       return format.getInteger("width") <= maxWidth && format.getInteger("height") <= maxHeight
           && (onlyProfile < 0 || (format.containsKey(MediaFormat.KEY_PROFILE)
