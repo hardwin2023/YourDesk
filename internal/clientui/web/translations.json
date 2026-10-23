@@ -3414,5 +3414,25 @@
     "YourDesk.app is missing from the package.",
     "パッケージに YourDesk.app がありません。",
     "패키지에 YourDesk.app이 없습니다."
+  ],
+  "遠端網路連線恢復逾時，請重新連線。": [
+    "Remote network recovery timed out. Please reconnect.",
+    "リモートネットワークの復帰がタイムアウトしました。再接続してください。",
+    "원격 네트워크 복구 시간이 초과되었습니다. 다시 연결하세요."
+  ],
+  "遠端控制通道持續無回應，連線已結束。": [
+    "The remote control channel stopped responding. The connection ended.",
+    "リモート制御チャネルが応答しないため、接続を終了しました。",
+    "원격 제어 채널이 계속 응답하지 않아 연결이 종료되었습니다."
+  ],
+  "遠端控制事件處理逾時，連線已結束。": [
+    "Remote input processing timed out. The connection ended.",
+    "リモート入力処理がタイムアウトしたため、接続を終了しました。",
+    "원격 입력 처리 시간이 초과되어 연결이 종료되었습니다."
+  ],
+  "遠端控制事件佇列已滿，連線已結束。": [
+    "The remote input queue is full. The connection ended.",
+    "リモート入力キューが満杯のため、接続を終了しました。",
+    "원격 입력 대기열이 가득 차 연결이 종료되었습니다."
   ]
 }

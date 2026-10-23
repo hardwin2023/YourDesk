@@ -167,7 +167,7 @@ func (g *game) Update() (err error) {
 				g.disconnected = true
 				g.releaseRawKeys("遠端連線已結束")
 				g.clipboard.CancelKeys("遠端連線已結束")
-				emitUIEvent("disconnected", "")
+				emitUIEvent("disconnected", g.peer.DisconnectReason())
 				ebiten.SetWindowTitle(g.windowTitle + " · ⏹")
 			}
 			if time.Since(g.disconnectedChecked) > time.Second {

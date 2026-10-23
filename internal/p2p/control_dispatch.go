@@ -18,7 +18,7 @@ func (p *Peer) dispatchControl(c Control, handler func(Control)) {
 			slog.Error("控制事件處理超過 30 秒，結束停滯連線")
 			authlog.Event("control-worker-stalled", nil)
 			authlog.Stacks()
-			p.markClosed()
+			p.markClosedReason("遠端控制事件處理逾時，連線已結束。")
 			go p.pc.Close()
 		})
 	})
@@ -36,7 +36,7 @@ func (p *Peer) dispatchControl(c Control, handler func(Control)) {
 		// 不默默遺失按鍵釋放或執行順序；接收回呼不等待失效程序清理。
 		p.controlOverflowOnce.Do(func() {
 			slog.Error("控制事件工作者佇列已滿，結束連線以釋放輸入狀態")
-			p.markClosed()
+			p.markClosedReason("遠端控制事件佇列已滿，連線已結束。")
 			go p.pc.Close()
 		})
 	}

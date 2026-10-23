@@ -991,6 +991,9 @@ func (s *server) start(kind, siteID, binary string, args []string) error {
 							p.stage = "connected"
 						case "disconnected":
 							p.stage = "disconnected"
+							if event.Message != "" {
+								s.notice = event.Message
+							}
 						case "authenticated":
 							if err := s.remember(p); err != nil {
 								s.notice = "無法保存連線密碼"

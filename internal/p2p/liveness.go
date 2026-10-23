@@ -45,7 +45,8 @@ func (p *Peer) startLiveness() {
 			}()
 			_, previousReceived := p.TrafficBytes()
 			monitorLiveness(ctx, func() bool { return p.Connected() && p.SupportsCommand("ping") }, func(ctx context.Context) error {
-				_, err := p.CallCommand(ctx, "ping")
+				response, err := p.CallCommand(ctx, "ping")
+				err = livenessResult(response, err)
 				if err != nil && ctx.Err() != context.Canceled {
 					authlog.Event("ping_timeout", nil)
 					p.diagnosticTransport()
@@ -56,6 +57,7 @@ func (p *Peer) startLiveness() {
 				slog.Error("P2P 控制通道超過恢復寬限仍無回應，結束失效連線")
 				authlog.Event("heartbeat-failed", nil)
 				authlog.Stacks()
+				p.markClosedReason(pingFailureMessage)
 				_ = p.Close()
 			}, func() bool {
 				_, received := p.TrafficBytes()
@@ -141,4 +143,14 @@ func (p *Peer) diagnosticTransport() {
 	for _, channel := range observation.Channels {
 		authlog.Event("channel", map[string]any{"layer": "L2", "label": channel.Label, "state": channel.State, "buffered": channel.Buffered})
 	}
+}
+
+// 命令結果與通道往返是不同判定；一般指令仍保留原本的錯誤回報。
+func livenessResult(response CommandResponse, err error) error {
+	// CallCommand 只會回傳已驗證版本且 ID 對應本次請求的回覆。
+	// busy／expired（含雙端時鐘誤差）等結果仍證明控制通道可以往返。
+	if response.Version == CommandVersion && response.ID != 0 {
+		return nil
+	}
+	return err
 }

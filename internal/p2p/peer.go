@@ -119,6 +119,7 @@ type Peer struct {
 	clipboardOnce       sync.Once
 	mu                  sync.RWMutex
 	closed              bool
+	disconnectReason    string
 	done                chan struct{}
 	doneOnce            sync.Once
 	controlSender       orderedControlSender
@@ -143,21 +144,13 @@ func NewHostWithTransport(ctx context.Context, signal *signaling.Client, mode pe
 	}
 	p := &Peer{pc: pc, done: make(chan struct{}), audioInbox: make(chan []byte, 8), clipboardInbox: make(chan []byte, 128), clipboardDone: make(chan struct{})}
 	p.bindTransport(link, mode)
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			p.markClosed()
-		}
-	})
+	p.bindConnectionStates()
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c != nil && strings.Contains(c.ToJSON().Candidate, " typ relay ") {
 			_ = pc.Close()
 		}
 	})
-	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
-		if s == webrtc.ICEConnectionStateFailed || s == webrtc.ICEConnectionStateDisconnected {
-			_ = pc.Close()
-		}
-	})
+
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		switch dc.Label() {
 		case AudioChannel:
@@ -321,16 +314,8 @@ func newViewerWithTransport(ctx context.Context, signal *signaling.Client, mode 
 	p := &Peer{pc: pc, done: make(chan struct{}), audioInbox: make(chan []byte, 8), clipboardInbox: make(chan []byte, 128), clipboardDone: make(chan struct{})}
 	p.filesOnly.Store(filesOnly)
 	p.bindTransport(link, mode)
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			p.markClosed()
-		}
-	})
-	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
-		if s == webrtc.ICEConnectionStateFailed || s == webrtc.ICEConnectionStateDisconnected {
-			_ = pc.Close()
-		}
-	})
+	p.bindConnectionStates()
+
 	var assembler frameAssembler
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		switch dc.Label() {
@@ -555,13 +540,8 @@ func (p *Peer) flushControl() {
 
 // Done 在 P2P 工作階段失敗或結束時關閉，供上層統一處理生命週期。
 func (p *Peer) Done() <-chan struct{} { return p.done }
-func (p *Peer) markClosed() {
-	p.mu.Lock()
-	p.closed = true
-	p.mu.Unlock()
-	p.doneOnce.Do(func() { close(p.done) })
-}
-func (p *Peer) Close() error { p.markClosed(); return p.pc.Close() }
+func (p *Peer) markClosed()           { p.markClosedReason("") }
+func (p *Peer) Close() error          { p.markClosed(); return p.pc.Close() }
 
 func waitGather(ctx context.Context, pc *webrtc.PeerConnection) error {
 	if pc.ICEGatheringState() == webrtc.ICEGatheringStateComplete {
